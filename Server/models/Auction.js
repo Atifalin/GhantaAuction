@@ -3,7 +3,8 @@ const mongoose = require('mongoose');
 const auctionSchema = new mongoose.Schema({
   name: {
     type: String,
-    required: true
+    required: true,
+    trim: true
   },
   host: {
     type: mongoose.Schema.Types.ObjectId,
@@ -16,35 +17,49 @@ const auctionSchema = new mongoose.Schema({
   }],
   budget: {
     type: Number,
-    required: true
+    required: true,
+    min: 0
   },
   status: {
     type: String,
-    enum: ['waiting', 'active', 'round2', 'completed'],
+    enum: ['waiting', 'active', 'paused', 'completed'],
     default: 'waiting'
   },
+  round: {
+    type: Number,
+    default: 1
+  },
+  availablePlayers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Player'
+  }],
+  skipVotes: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
   currentPlayer: {
     player: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Player'
     },
     currentBid: {
-      amount: Number,
+      amount: {
+        type: Number,
+        default: 0
+      },
       bidder: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'User'
       }
     },
-    timeLeft: Number
+    timeLeft: {
+      type: Number,
+      default: 30
+    },
+    startTime: {
+      type: Date
+    }
   },
-  round: {
-    type: Number,
-    default: 1
-  },
-  skippedPlayers: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Player'
-  }],
   completedPlayers: [{
     player: {
       type: mongoose.Schema.Types.ObjectId,
@@ -55,7 +70,15 @@ const auctionSchema = new mongoose.Schema({
       ref: 'User'
     },
     amount: Number
-  }]
+  }],
+  skippedPlayers: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Player'
+  }],
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
 }, {
   timestamps: true
 });

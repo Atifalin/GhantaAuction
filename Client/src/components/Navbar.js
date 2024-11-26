@@ -1,89 +1,123 @@
-import React from 'react';
-import { useNavigate, Link as RouterLink } from 'react-router-dom';
+import React, { useState } from 'react';
 import {
   AppBar,
   Toolbar,
   Typography,
-  Button,
+  IconButton,
+  Menu,
+  MenuItem,
   Box,
-  useTheme,
+  Button
 } from '@mui/material';
-import axios from 'axios';
+import AccountCircle from '@mui/icons-material/AccountCircle';
+import GavelIcon from '@mui/icons-material/Gavel';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { useUser } from '../context/UserContext';
 
 const Navbar = () => {
   const navigate = useNavigate();
-  const theme = useTheme();
-  const user = JSON.parse(localStorage.getItem('user'));
+  const location = useLocation();
+  const [anchorEl, setAnchorEl] = useState(null);
+  const { user, logout } = useUser();
+
+  const handleMenu = (event) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleClose = () => {
+    setAnchorEl(null);
+  };
 
   const handleLogout = async () => {
     try {
-      await axios.post('http://localhost:5000/api/auth/logout', {
-        username: user.username
-      });
+      await logout();
+      navigate('/login');
     } catch (error) {
-      console.error('Logout failed:', error);
+      console.error('Logout error:', error);
+    } finally {
+      handleClose();
     }
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    navigate('/');
+  };
+
+  const isActive = (path) => {
+    return location.pathname === path;
   };
 
   if (!user) return null;
 
   return (
-    <AppBar 
-      position="static" 
-      sx={{
-        backgroundColor: theme.palette.mode === 'dark' ? '#1e1e1e' : '#ffffff',
-        color: theme.palette.text.primary,
-      }}
-    >
+    <AppBar position="static">
       <Toolbar>
-        <Typography variant="h6" sx={{ flexGrow: 1 }}>
-          GhantaAuction
+        <GavelIcon sx={{ mr: 2 }} />
+        <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+          Ghanta Auction
         </Typography>
-        
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <Button color="inherit" component={RouterLink} to="/dashboard">
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+          <Button
+            color="inherit"
+            onClick={() => navigate('/dashboard')}
+            sx={{
+              backgroundColor: isActive('/dashboard') ? 'rgba(255,255,255,0.1)' : 'transparent'
+            }}
+          >
             Dashboard
           </Button>
-          <Button color="inherit" component={RouterLink} to="/players">
+          <Button
+            color="inherit"
+            onClick={() => navigate('/players')}
+            sx={{
+              backgroundColor: isActive('/players') ? 'rgba(255,255,255,0.1)' : 'transparent'
+            }}
+          >
             Players
           </Button>
-          <Button color="inherit" component={RouterLink} to="/team">
-            My Team
-          </Button>
-          
-          <Box 
-            sx={{ 
-              display: 'flex', 
-              alignItems: 'center',
-              gap: 1,
-              ml: 2,
-              px: 2,
-              py: 0.5,
-              borderRadius: 1,
-              backgroundColor: theme.palette.action.hover,
-            }}
-          >
-            <Box sx={{ fontSize: '1.25rem' }}>{user.emoji}</Box>
-            <Typography>{user.username}</Typography>
-          </Box>
-
-          <Button 
-            color="inherit" 
-            onClick={handleLogout}
+          <Button
+            color="inherit"
+            onClick={() => navigate('/team')}
             sx={{
-              ml: 1,
-              borderRadius: 1,
-              backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)',
-              '&:hover': {
-                backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)',
-              }
+              backgroundColor: isActive('/team') ? 'rgba(255,255,255,0.1)' : 'transparent'
             }}
           >
-            Logout
+            Team
           </Button>
+          <Button
+            color="inherit"
+            onClick={() => navigate('/auctions')}
+            sx={{
+              backgroundColor: isActive('/auctions') ? 'rgba(255,255,255,0.1)' : 'transparent'
+            }}
+          >
+            Auctions
+          </Button>
+          <div>
+            <IconButton
+              size="large"
+              aria-label="account of current user"
+              aria-controls="menu-appbar"
+              aria-haspopup="true"
+              onClick={handleMenu}
+              color="inherit"
+            >
+              <AccountCircle />
+            </IconButton>
+            <Menu
+              id="menu-appbar"
+              anchorEl={anchorEl}
+              anchorOrigin={{
+                vertical: 'bottom',
+                horizontal: 'right',
+              }}
+              keepMounted
+              transformOrigin={{
+                vertical: 'top',
+                horizontal: 'right',
+              }}
+              open={Boolean(anchorEl)}
+              onClose={handleClose}
+            >
+              <MenuItem onClick={handleLogout}>Logout</MenuItem>
+            </Menu>
+          </div>
         </Box>
       </Toolbar>
     </AppBar>

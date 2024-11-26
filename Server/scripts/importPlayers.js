@@ -40,7 +40,7 @@ let totalPlayers = 0;
 let skippedPlayers = 0;
 
 // Process CSV file
-fs.createReadStream('../players.csv')
+fs.createReadStream('e:/Projects/GhantaAuction/players.csv')
   .pipe(csv())
   .on('data', (row) => {
     try {

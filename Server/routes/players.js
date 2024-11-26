@@ -83,4 +83,65 @@ router.get('/meta/positions', async (req, res) => {
   }
 });
 
+// Toggle favorite status for a player
+router.post('/:id/favorite', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body;
+
+    console.log('Favorite request:', { playerId: id, userId, body: req.body });
+
+    if (!userId) {
+      console.error('Missing userId in request body');
+      return res.status(400).json({ 
+        message: 'User ID is required',
+        receivedBody: req.body 
+      });
+    }
+
+    const player = await Player.findById(id);
+    if (!player) {
+      console.error('Player not found:', id);
+      return res.status(404).json({ message: 'Player not found' });
+    }
+
+    console.log('Current favorites:', player.favorites);
+
+    // Initialize favorites array if it doesn't exist
+    if (!player.favorites) {
+      player.favorites = [];
+    }
+
+    // Convert favorites to strings for comparison
+    const favorites = player.favorites.map(f => f.toString());
+    const favoriteIndex = favorites.indexOf(userId.toString());
+
+    if (favoriteIndex === -1) {
+      // Add to favorites
+      console.log('Adding to favorites:', userId);
+      player.favorites.push(userId);
+    } else {
+      // Remove from favorites
+      console.log('Removing from favorites:', userId);
+      player.favorites.splice(favoriteIndex, 1);
+    }
+
+    const savedPlayer = await player.save();
+    console.log('Updated favorites:', savedPlayer.favorites);
+
+    res.json({ 
+      favorites: savedPlayer.favorites,
+      message: favoriteIndex === -1 ? 'Added to favorites' : 'Removed from favorites',
+      isFavorited: favoriteIndex === -1
+    });
+  } catch (err) {
+    console.error('Error toggling favorite:', err);
+    res.status(500).json({ 
+      message: 'Server error', 
+      error: err.message,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
+  }
+});
+
 module.exports = router;

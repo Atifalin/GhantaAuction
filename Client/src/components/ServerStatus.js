@@ -1,62 +1,73 @@
 import React, { useState, useEffect } from 'react';
-import { Paper, Typography } from '@mui/material';
-import { socket } from '../services/socket';
+import { Paper, Typography, Box } from '@mui/material';
+import { socketService } from '../services/socket';
+import { useUser } from '../context/UserContext';
 
 const ServerStatus = () => {
-  const [status, setStatus] = useState('Connecting...');
-  const [color, setColor] = useState('orange');
+  const [isConnected, setIsConnected] = useState(false);
+  const { user } = useUser();
 
   useEffect(() => {
-    function onConnect() {
-      setStatus('Connected to server');
-      setColor('green');
-    }
+    const socket = socketService.getSocket();
 
-    function onDisconnect() {
-      setStatus('Disconnected from server');
-      setColor('red');
-    }
-
-    function onConnectError() {
-      setStatus('Connection error');
-      setColor('red');
-    }
-
-    socket.on('connect', onConnect);
-    socket.on('disconnect', onDisconnect);
-    socket.on('connect_error', onConnectError);
-
-    return () => {
-      socket.off('connect', onConnect);
-      socket.off('disconnect', onDisconnect);
-      socket.off('connect_error', onConnectError);
+    const handleConnect = () => {
+      setIsConnected(true);
+      if (user?.id) {
+        socket.emit('userConnected', user.id);
+      }
     };
-  }, []);
+
+    const handleDisconnect = () => {
+      setIsConnected(false);
+    };
+
+    // Set initial connection status
+    setIsConnected(socket.connected);
+
+    // Set up event listeners
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
+
+    // Cleanup
+    return () => {
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+    };
+  }, [user]);
 
   return (
     <Paper
+      elevation={3}
       sx={{
         position: 'fixed',
         bottom: 0,
         left: 0,
         right: 0,
-        p: 1,
-        textAlign: 'center',
+        height: '48px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
         backgroundColor: 'background.paper',
         borderTop: 1,
         borderColor: 'divider',
+        zIndex: 9999,
+        px: 2
       }}
-      elevation={3}
     >
-      <Typography
-        variant="body2"
-        sx={{
-          color: color,
-          fontWeight: 'medium',
-        }}
-      >
-        {status}
-      </Typography>
+      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+        <div
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            backgroundColor: isConnected ? '#4caf50' : '#ff5252',
+            marginRight: 8
+          }}
+        />
+        <Typography variant="body2" color="textSecondary">
+          {isConnected ? 'Connected' : 'Disconnected'}
+        </Typography>
+      </Box>
     </Paper>
   );
 };

@@ -1,147 +1,144 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
 import {
   Container,
   Paper,
   Typography,
   Box,
-  Alert,
+  Avatar,
   Grid,
-  useTheme,
+  CircularProgress,
 } from '@mui/material';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-
-const UserCard = ({ user, onClick }) => {
-  const theme = useTheme();
-  const isOnline = user.status === 'online';
-
-  return (
-    <Paper
-      elevation={3}
-      sx={{
-        p: 3,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        cursor: 'pointer',
-        transition: 'transform 0.2s ease-in-out',
-        position: 'relative',
-        '&:hover': {
-          transform: 'translateY(-4px)',
-        },
-        border: `2px solid ${isOnline ? '#4caf50' : '#bdbdbd'}`,
-      }}
-      onClick={onClick}
-    >
-      {/* Status Indicator */}
-      <Box
-        sx={{
-          position: 'absolute',
-          top: 8,
-          right: 8,
-          width: 12,
-          height: 12,
-          borderRadius: '50%',
-          backgroundColor: isOnline ? '#4caf50' : '#bdbdbd',
-          boxShadow: `0 0 0 2px ${theme.palette.background.paper}`,
-        }}
-      />
-
-      {/* Emoji */}
-      <Box
-        sx={{
-          fontSize: '2.5rem',
-          mb: 2,
-          width: 64,
-          height: 64,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          borderRadius: '50%',
-          backgroundColor: theme.palette.action.hover,
-        }}
-      >
-        {user.emoji}
-      </Box>
-
-      {/* Username */}
-      <Typography variant="h6" sx={{ fontWeight: 500 }}>
-        {user.username}
-      </Typography>
-
-      {/* Status Text */}
-      <Typography
-        variant="body2"
-        sx={{
-          color: isOnline ? 'success.main' : 'text.secondary',
-          mt: 1,
-        }}
-      >
-        {isOnline ? 'Online' : 'Offline'}
-      </Typography>
-    </Paper>
-  );
-};
+import { useUser } from '../context/UserContext';
+import { socketService } from '../services/socket';
 
 const Login = () => {
-  const navigate = useNavigate();
   const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const navigate = useNavigate();
+  const { login, user } = useUser();
+
+  useEffect(() => {
+    if (user) {
+      navigate('/dashboard');
+    }
+  }, [user, navigate]);
 
   useEffect(() => {
     const fetchUsers = async () => {
       try {
         const response = await axios.get('http://localhost:5000/api/auth/users');
         setUsers(response.data);
-      } catch (err) {
-        setError('Failed to fetch users');
+      } catch (error) {
+        console.error('Error fetching users:', error);
+        setError('Failed to load users');
+      } finally {
+        setLoading(false);
       }
     };
+
     fetchUsers();
   }, []);
 
-  const handleLogin = async (username) => {
-    setError('');
+  const handleLogin = async (selectedUser) => {
     try {
-      const response = await axios.post('http://localhost:5000/api/auth/login', { username });
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
-      navigate('/dashboard');
-    } catch (err) {
-      if (err.response?.data?.error === 'USER_ALREADY_ONLINE') {
-        setError('This user is already logged in from another device');
-      } else {
-        setError(err.response?.data?.message || 'Login failed');
+      if (selectedUser.status === 'online') {
+        setError('This user is already logged in');
+        return;
       }
+
+      setLoading(true);
+      setError('');
+
+      const response = await axios.post('http://localhost:5000/api/auth/login', {
+        username: selectedUser.username
+      });
+
+      if (response.data.token && response.data.user) {
+        localStorage.setItem('token', response.data.token);
+        axios.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
+        await login(response.data.user);
+        navigate('/dashboard');
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      setError(error.response?.data?.message || 'Failed to log in. Please try again.');
+    } finally {
+      setLoading(false);
     }
   };
 
-  return (
-    <Container maxWidth="md">
-      <Box sx={{ py: 8 }}>
-        <Typography
-          variant="h3"
-          align="center"
-          gutterBottom
-          sx={{ fontWeight: 700, mb: 6 }}
-        >
-          GhantaAuction
-        </Typography>
-
-        {error && (
-          <Alert severity="error" sx={{ mb: 4 }}>
-            {error}
-          </Alert>
-        )}
-
-        <Grid container spacing={3}>
-          {users.map((user) => (
-            <Grid item xs={12} sm={6} key={user.username}>
-              <UserCard user={user} onClick={() => handleLogin(user.username)} />
-            </Grid>
-          ))}
-        </Grid>
+  if (loading && users.length === 0) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
+        <CircularProgress />
       </Box>
+    );
+  }
+
+  return (
+    <Container maxWidth="sm">
+      <Box sx={{ mt: 8, mb: 4 }}>
+        <Typography variant="h3" align="center" gutterBottom>
+          Ghanta Auction
+        </Typography>
+        <Typography variant="h6" align="center" color="textSecondary" gutterBottom>
+          Select your profile to continue
+        </Typography>
+      </Box>
+      
+      {error && (
+        <Paper sx={{ p: 2, mb: 2, bgcolor: '#ffebee' }}>
+          <Typography color="error">{error}</Typography>
+        </Paper>
+      )}
+
+      <Grid container spacing={2} justifyContent="center">
+        {users.map((user) => (
+          <Grid item xs={12} sm={6} key={user._id}>
+            <Paper
+              sx={{
+                p: 2,
+                cursor: user.status === 'online' ? 'not-allowed' : 'pointer',
+                transition: 'transform 0.2s',
+                '&:hover': {
+                  transform: user.status === 'online' ? 'none' : 'scale(1.02)',
+                },
+                bgcolor: user.status === 'online' ? '#f5f5f5' : 'background.paper',
+                opacity: user.status === 'online' ? 0.7 : 1,
+                position: 'relative'
+              }}
+              onClick={() => user.status !== 'online' && handleLogin(user)}
+            >
+              <Box display="flex" alignItems="center" gap={2}>
+                <Avatar
+                  sx={{
+                    bgcolor: user.color,
+                    width: 56,
+                    height: 56,
+                    fontSize: '1.5rem'
+                  }}
+                >
+                  {user.emoji}
+                </Avatar>
+                <Box>
+                  <Typography variant="h6">
+                    {user.username}
+                  </Typography>
+                  <Typography
+                    variant="body2"
+                    color={user.status === 'online' ? 'error.main' : 'success.main'}
+                  >
+                    {user.status === 'online' ? '● Already logged in' : '○ Available'}
+                  </Typography>
+                </Box>
+              </Box>
+            </Paper>
+          </Grid>
+        ))}
+      </Grid>
     </Container>
   );
 };

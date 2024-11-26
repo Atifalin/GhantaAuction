@@ -4,16 +4,15 @@ const userSchema = new mongoose.Schema({
   username: {
     type: String,
     required: true,
-    unique: true,
-    trim: true
+    unique: true
   },
   emoji: {
     type: String,
-    required: true
+    default: '👤'
   },
   color: {
     type: String,
-    required: true
+    default: '#1976d2'
   },
   status: {
     type: String,
@@ -22,7 +21,7 @@ const userSchema = new mongoose.Schema({
   },
   budget: {
     type: Number,
-    default: 1000
+    default: 1000000
   },
   team: [{
     type: mongoose.Schema.Types.ObjectId,
@@ -44,50 +43,51 @@ const userSchema = new mongoose.Schema({
 userSchema.statics.getPredefinedUsers = function() {
   return [
     {
-      username: 'atif',
-      emoji: '⚽',
-      color: '#FF5722',
-      status: 'offline',
-      budget: 1000
+      username: 'Atif',
+      emoji: '👑',
+      color: '#FF0000',
+      budget: 1000000
     },
     {
-      username: 'saqib',
+      username: 'Saqib',
       emoji: '🎯',
-      color: '#2196F3',
-      status: 'offline',
-      budget: 1000
+      color: '#0000FF',
+      budget: 1000000
     },
     {
-      username: 'aqib',
-      emoji: '🎮',
-      color: '#4CAF50',
-      status: 'offline',
-      budget: 1000
+      username: 'Aqib',
+      emoji: '⚡',
+      color: '#00FF00',
+      budget: 1000000
     },
     {
-      username: 'wasif',
-      emoji: '🏆',
-      color: '#9C27B0',
-      status: 'offline',
-      budget: 1000
+      username: 'Wasif',
+      emoji: '🌟',
+      color: '#FFA500',
+      budget: 1000000
     }
   ];
 };
 
-// Initialize predefined users in the database
+// Initialize predefined users and remove any others
 userSchema.statics.initializePredefinedUsers = async function() {
   try {
+    // First, remove all existing users
+    await this.deleteMany({});
+    console.log('Cleared all existing users');
+
+    // Get predefined users
     const predefinedUsers = this.getPredefinedUsers();
     
+    // Create the predefined users
     for (const userData of predefinedUsers) {
-      await this.findOneAndUpdate(
-        { username: userData.username },
-        userData,
-        { upsert: true, new: true, setDefaultsOnInsert: true }
-      );
+      await this.create({
+        ...userData,
+        status: 'offline'
+      });
     }
     
-    console.log('Predefined users initialized successfully');
+    console.log('Successfully initialized predefined users');
   } catch (error) {
     console.error('Error initializing predefined users:', error);
     throw error;

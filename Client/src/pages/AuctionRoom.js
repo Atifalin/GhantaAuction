@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   Container,
   Grid,
@@ -14,25 +14,34 @@ import {
   ListItemText,
   CircularProgress,
   Chip,
+  TextField,
+  Avatar,
+  LinearProgress,
 } from '@mui/material';
+import axios from 'axios';
 import { socket } from '../services/socket';
 
 const AuctionRoom = () => {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [auction, setAuction] = useState(null);
   const [currentPlayer, setCurrentPlayer] = useState(null);
-  const [timeLeft, setTimeLeft] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(30);
   const [participants, setParticipants] = useState([]);
+  const [customBid, setCustomBid] = useState('');
+  const [bidError, setBidError] = useState('');
   const user = JSON.parse(localStorage.getItem('user'));
 
   useEffect(() => {
-    socket.emit('joinAuction', id);
+    socket.emit('joinAuction', { auctionId: id, userId: user._id });
 
     socket.on('auctionUpdate', (data) => {
       setAuction(data);
       setCurrentPlayer(data.currentPlayer);
-      setTimeLeft(data.currentPlayer?.timeLeft || 0);
+      setTimeLeft(data.currentPlayer?.timeLeft || 30);
       setParticipants(data.participants);
+      setBidError('');
+      setCustomBid('');
     });
 
     socket.on('bidPlaced', (data) => {
@@ -40,30 +49,93 @@ const AuctionRoom = () => {
         ...prev,
         currentBid: data
       }));
+      setBidError('');
+    });
+
+    socket.on('bidError', (error) => {
+      setBidError(error);
     });
 
     socket.on('timerUpdate', (time) => {
       setTimeLeft(time);
     });
 
+    socket.on('playerSkipped', ({ skippedPlayer, nextPlayer }) => {
+      setCurrentPlayer(nextPlayer);
+      setTimeLeft(30);
+      setBidError('');
+      setCustomBid('');
+    });
+
+    socket.on('playerAssigned', ({ winner, player }) => {
+      if (winner._id === user._id) {
+        // Show success message or notification
+      }
+    });
+
+    socket.on('auctionCompleted', () => {
+      navigate('/team-management');
+    });
+
     return () => {
-      socket.emit('leaveAuction', id);
+      socket.emit('leaveAuction', { auctionId: id, userId: user._id });
       socket.off('auctionUpdate');
       socket.off('bidPlaced');
+      socket.off('bidError');
       socket.off('timerUpdate');
+      socket.off('playerSkipped');
+      socket.off('playerAssigned');
+      socket.off('auctionCompleted');
     };
-  }, [id]);
+  }, [id, user._id, navigate]);
 
-  const placeBid = (amount) => {
-    socket.emit('placeBid', {
-      auctionId: id,
-      userId: user.id,
-      amount: currentPlayer.currentBid.amount + amount
-    });
+  const placeBid = async (amount) => {
+    try {
+      await axios.post(`http://localhost:5000/api/auctions/${id}/bid`, {
+        amount: parseInt(amount),
+        userId: user._id
+      });
+      setCustomBid('');
+      setBidError('');
+    } catch (error) {
+      console.error('Error placing bid:', error);
+      setBidError(error.response?.data?.message || 'Failed to place bid');
+    }
+  };
+
+  const handleCustomBid = () => {
+    const amount = parseInt(customBid);
+    if (isNaN(amount) || amount <= 0) {
+      setBidError('Please enter a valid bid amount');
+      return;
+    }
+
+    if (amount <= (currentPlayer?.currentBid?.amount || 0)) {
+      setBidError('Bid must be higher than current bid');
+      return;
+    }
+
+    if (amount > user.budget) {
+      setBidError('Bid cannot exceed your budget');
+      return;
+    }
+
+    placeBid(amount);
+  };
+
+  const handleSkip = async () => {
+    try {
+      await axios.post(`http://localhost:5000/api/auctions/${id}/skip`, {
+        userId: user._id
+      });
+    } catch (error) {
+      console.error('Error voting to skip:', error);
+      setBidError(error.response?.data?.message || 'Error voting to skip');
+    }
   };
 
   const startAuction = () => {
-    socket.emit('startAuction', id);
+    socket.emit('startAuction', { auctionId: id, userId: user._id });
   };
 
   if (!auction) {
@@ -85,7 +157,7 @@ const AuctionRoom = () => {
                 <Typography variant="h5" gutterBottom>
                   Waiting for auction to start...
                 </Typography>
-                {auction.host === user.id && (
+                {auction.host === user._id && (
                   <Button
                     variant="contained"
                     color="primary"
@@ -102,20 +174,39 @@ const AuctionRoom = () => {
                   <Typography variant="h5">
                     Current Player
                   </Typography>
-                  <Chip
-                    label={`${timeLeft}s`}
-                    color={timeLeft <= 10 ? 'error' : 'primary'}
-                  />
+                  <Box>
+                    <LinearProgress 
+                      variant="determinate" 
+                      value={(timeLeft / 30) * 100} 
+                      sx={{ mb: 1, minWidth: 100 }}
+                    />
+                    <Chip
+                      label={`${timeLeft}s`}
+                      color={timeLeft <= 10 ? 'error' : 'primary'}
+                    />
+                  </Box>
                 </Box>
                 <Card>
                   <CardContent>
-                    <Typography variant="h4" gutterBottom>
-                      {currentPlayer.player.name}
-                    </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                      <Avatar
+                        src={currentPlayer.player.photo}
+                        alt={currentPlayer.player.shortName}
+                        sx={{ width: 80, height: 80, mr: 2 }}
+                      />
+                      <Box>
+                        <Typography variant="h4" gutterBottom>
+                          {currentPlayer.player.shortName}
+                        </Typography>
+                        <Typography variant="subtitle1" color="textSecondary">
+                          {currentPlayer.player.longName}
+                        </Typography>
+                      </Box>
+                    </Box>
                     <Grid container spacing={2}>
                       <Grid item xs={6}>
                         <Typography variant="body1">
-                          Position: {currentPlayer.player.position}
+                          Position: {currentPlayer.player.mainPosition}
                         </Typography>
                       </Grid>
                       <Grid item xs={6}>
@@ -123,13 +214,27 @@ const AuctionRoom = () => {
                           Overall: {currentPlayer.player.overall}
                         </Typography>
                       </Grid>
-                      {Object.entries(currentPlayer.player.stats).map(([stat, value]) => (
-                        <Grid item xs={6} key={stat}>
-                          <Typography variant="body1">
-                            {stat.charAt(0).toUpperCase() + stat.slice(1)}: {value}
-                          </Typography>
-                        </Grid>
-                      ))}
+                      <Grid item xs={6}>
+                        <Typography variant="body1">
+                          Club: {currentPlayer.player.club}
+                        </Typography>
+                      </Grid>
+                      <Grid item xs={6}>
+                        <Typography variant="body1">
+                          Nationality: {currentPlayer.player.nationality}
+                        </Typography>
+                      </Grid>
+                      <Grid item xs={12}>
+                        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                          {['pace', 'shooting', 'passing', 'dribbling', 'defending', 'physical'].map(stat => (
+                            <Chip
+                              key={stat}
+                              label={`${stat.charAt(0).toUpperCase() + stat.slice(1)}: ${currentPlayer.player[stat]}`}
+                              variant="outlined"
+                            />
+                          ))}
+                        </Box>
+                      </Grid>
                     </Grid>
                     <Box sx={{ mt: 3, textAlign: 'center' }}>
                       <Typography variant="h6" gutterBottom>
@@ -140,19 +245,50 @@ const AuctionRoom = () => {
                           Highest Bidder: {currentPlayer.currentBid.bidder.username}
                         </Typography>
                       )}
-                      <Box sx={{ mt: 2 }}>
+                      {bidError && (
+                        <Typography color="error" variant="body2" sx={{ mb: 2 }}>
+                          {bidError}
+                        </Typography>
+                      )}
+                      <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 2 }}>
                         <Button
                           variant="contained"
-                          onClick={() => placeBid(5)}
-                          sx={{ mr: 1 }}
+                          onClick={() => placeBid(currentPlayer.currentBid.amount + 5)}
+                          disabled={user.budget < currentPlayer.currentBid.amount + 5}
                         >
                           +$5
                         </Button>
                         <Button
                           variant="contained"
-                          onClick={() => placeBid(10)}
+                          onClick={() => placeBid(currentPlayer.currentBid.amount + 10)}
+                          disabled={user.budget < currentPlayer.currentBid.amount + 10}
                         >
                           +$10
+                        </Button>
+                      </Box>
+                      <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
+                        <TextField
+                          size="small"
+                          type="number"
+                          label="Custom Bid"
+                          value={customBid}
+                          onChange={(e) => setCustomBid(e.target.value)}
+                          sx={{ width: 150 }}
+                        />
+                        <Button
+                          variant="contained"
+                          onClick={handleCustomBid}
+                          disabled={!customBid || user.budget < parseInt(customBid)}
+                        >
+                          Place Bid
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          color="secondary"
+                          onClick={handleSkip}
+                          disabled={auction?.skipVotes?.includes(user._id)}
+                        >
+                          Skip Player ({auction?.skipVotes?.length || 0}/{participants.length})
                         </Button>
                       </Box>
                     </Box>
@@ -177,7 +313,12 @@ const AuctionRoom = () => {
               {participants.map((participant) => (
                 <ListItem key={participant._id}>
                   <ListItemText
-                    primary={participant.username}
+                    primary={
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        {participant.emoji}
+                        <span style={{ color: participant.color }}>{participant.username}</span>
+                      </Box>
+                    }
                     secondary={`Budget: $${participant.budget}`}
                   />
                   {auction.host === participant._id && (
