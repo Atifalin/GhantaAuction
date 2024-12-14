@@ -7,9 +7,9 @@ import {
   Menu,
   MenuItem,
   Box,
-  Button
+  Button,
+  Avatar
 } from '@mui/material';
-import AccountCircle from '@mui/icons-material/AccountCircle';
 import GavelIcon from '@mui/icons-material/Gavel';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useUser } from '../context/UserContext';
@@ -45,79 +45,85 @@ const Navbar = () => {
 
   if (!user) return null;
 
+  const navItems = [
+    { path: '/dashboard', label: 'Dashboard' },
+    { path: '/auctions', label: 'Auctions' },
+    { path: '/players', label: 'Players' },
+    { path: '/team', label: 'Team Management' },
+  ];
+
+  // Generate avatar text from username
+  const getAvatarText = (username) => {
+    return username.slice(0, 2).toUpperCase();
+  };
+
   return (
     <AppBar position="static">
       <Toolbar>
         <GavelIcon sx={{ mr: 2 }} />
-        <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
+        <Typography variant="h6" component="div" sx={{ flexGrow: 0, mr: 4 }}>
           Ghanta Auction
         </Typography>
-        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-          <Button
-            color="inherit"
-            onClick={() => navigate('/dashboard')}
-            sx={{
-              backgroundColor: isActive('/dashboard') ? 'rgba(255,255,255,0.1)' : 'transparent'
-            }}
-          >
-            Dashboard
-          </Button>
-          <Button
-            color="inherit"
-            onClick={() => navigate('/players')}
-            sx={{
-              backgroundColor: isActive('/players') ? 'rgba(255,255,255,0.1)' : 'transparent'
-            }}
-          >
-            Players
-          </Button>
-          <Button
-            color="inherit"
-            onClick={() => navigate('/team')}
-            sx={{
-              backgroundColor: isActive('/team') ? 'rgba(255,255,255,0.1)' : 'transparent'
-            }}
-          >
-            Team
-          </Button>
-          <Button
-            color="inherit"
-            onClick={() => navigate('/auctions')}
-            sx={{
-              backgroundColor: isActive('/auctions') ? 'rgba(255,255,255,0.1)' : 'transparent'
-            }}
-          >
-            Auctions
-          </Button>
-          <div>
-            <IconButton
-              size="large"
-              aria-label="account of current user"
-              aria-controls="menu-appbar"
-              aria-haspopup="true"
-              onClick={handleMenu}
+        
+        <Box sx={{ display: 'flex', gap: 2, alignItems: 'center', flexGrow: 1 }}>
+          {navItems.map((item) => (
+            <Button
+              key={item.path}
               color="inherit"
-            >
-              <AccountCircle />
-            </IconButton>
-            <Menu
-              id="menu-appbar"
-              anchorEl={anchorEl}
-              anchorOrigin={{
-                vertical: 'bottom',
-                horizontal: 'right',
+              onClick={() => navigate(item.path)}
+              sx={{
+                backgroundColor: isActive(item.path) ? 'rgba(255,255,255,0.1)' : 'transparent',
+                '&:hover': {
+                  backgroundColor: 'rgba(255,255,255,0.2)',
+                },
               }}
-              keepMounted
-              transformOrigin={{
-                vertical: 'top',
-                horizontal: 'right',
-              }}
-              open={Boolean(anchorEl)}
-              onClose={handleClose}
             >
-              <MenuItem onClick={handleLogout}>Logout</MenuItem>
-            </Menu>
-          </div>
+              {item.label}
+            </Button>
+          ))}
+        </Box>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Typography variant="body1" color="inherit">
+            {user.username}
+          </Typography>
+          
+          <IconButton
+            size="small"
+            aria-label="account of current user"
+            aria-controls="menu-appbar"
+            aria-haspopup="true"
+            onClick={handleMenu}
+            color="inherit"
+          >
+            <Avatar 
+              sx={{ 
+                width: 35, 
+                height: 35, 
+                bgcolor: user.color || 'secondary.main',
+                fontSize: '0.9rem'
+              }}
+            >
+              {getAvatarText(user.username)}
+            </Avatar>
+          </IconButton>
+          <Menu
+            id="menu-appbar"
+            anchorEl={anchorEl}
+            anchorOrigin={{
+              vertical: 'bottom',
+              horizontal: 'right',
+            }}
+            keepMounted
+            transformOrigin={{
+              vertical: 'top',
+              horizontal: 'right',
+            }}
+            open={Boolean(anchorEl)}
+            onClose={handleClose}
+          >
+            <MenuItem onClick={handleLogout}>Logout</MenuItem>
+          </Menu>
         </Box>
       </Toolbar>
     </AppBar>

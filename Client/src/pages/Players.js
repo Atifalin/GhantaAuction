@@ -1,26 +1,38 @@
 import React, { useState, useEffect } from 'react';
 import {
   Container,
-  TextField,
   Grid,
-  Card,
-  CardContent,
+  Paper,
   Typography,
   Box,
-  Chip,
+  TextField,
+  InputAdornment,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
-  InputAdornment,
-  Avatar,
+  IconButton,
+  Chip,
   CircularProgress,
   Alert,
+  Avatar,
   Button,
-  IconButton,
+  Divider,
+  Tooltip,
 } from '@mui/material';
-import { Search as SearchIcon, Favorite, FavoriteBorder } from '@mui/icons-material';
+import {
+  Search as SearchIcon,
+  Favorite,
+  FavoriteBorder,
+  SportsSoccer as PlayerIcon,
+  EmojiEvents as TrophyIcon,
+  Speed as SpeedIcon,
+  Login as LoginIcon,
+} from '@mui/icons-material';
+import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer } from 'recharts';
 import axios from 'axios';
+import { useUser } from '../context/UserContext';
+import { useNavigate } from 'react-router-dom';
 
 const Players = () => {
   const [players, setPlayers] = useState([]);
@@ -28,41 +40,34 @@ const Players = () => {
   const [positionFilter, setPositionFilter] = useState('all');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const user = JSON.parse(localStorage.getItem('user'));
+  const { user, login } = useUser();
+  const navigate = useNavigate();
 
   useEffect(() => {
     fetchPlayers();
-  }, []);
+  }, [user]); // Refetch when user changes
 
   const fetchPlayers = async () => {
     try {
       setLoading(true);
       setError(null);
-      console.log('Fetching players...');
+      
+      const token = localStorage.getItem('token');
       const response = await axios.get('http://localhost:5000/api/players', {
-        timeout: 5000,
         headers: {
+          'Authorization': `Bearer ${token}`,
           'Accept': 'application/json',
           'Content-Type': 'application/json'
         }
       });
-      console.log('Response:', response);
+
       if (!response.data || !Array.isArray(response.data)) {
         throw new Error('Invalid response format from server');
       }
       setPlayers(response.data);
     } catch (error) {
-      console.error('Error details:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status,
-        stack: error.stack
-      });
-      setError(
-        error.response?.data?.message || 
-        error.message || 
-        'Failed to fetch players'
-      );
+      console.error('Error fetching players:', error);
+      setError(error.response?.data?.message || 'Failed to fetch players');
     } finally {
       setLoading(false);
     }
@@ -70,61 +75,77 @@ const Players = () => {
 
   const handleFavorite = async (playerId) => {
     try {
-      const userData = localStorage.getItem('user');
-      console.log('Raw user data from localStorage:', userData);
-      console.log('Parsed user:', user);
-      console.log('User ID being sent:', user?._id);
-      
-      if (!user?._id) {
-        console.error('No valid user ID found');
+      if (!user) {
+        setError('Please log in to favorite players');
         return;
       }
 
-      const response = await axios.post(`http://localhost:5000/api/players/${playerId}/favorite`, {
-        userId: user._id
-      });
-      
-      console.log('Favorite response:', response.data);
-      
-      setPlayers(players.map(player => {
-        if (player._id === playerId) {
-          console.log('Updating player:', player.shortName);
-          return { ...player, favorites: response.data.favorites };
+      const token = localStorage.getItem('token');
+      if (!token) {
+        setError('Please log in to favorite players');
+        return;
+      }
+
+      const response = await axios.post(
+        `http://localhost:5000/api/players/${playerId}/favorite`,
+        {},
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
         }
-        return player;
-      }));
+      );
+      
+      if (response.data) {
+        setPlayers(players.map(player => {
+          if (player._id === playerId) {
+            return { ...player, isFavorite: !player.isFavorite };
+          }
+          return player;
+        }));
+        setError(null);
+      }
     } catch (error) {
-      console.error('Error favoriting player:', error.response || error);
+      console.error('Error favoriting player:', error);
+      if (error.response?.status === 401) {
+        setError('Your session has expired. Please log in again.');
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+      } else {
+        setError(error.response?.data?.message || 'Failed to favorite player');
+      }
     }
   };
 
   const isFavorited = (player) => {
-    if (!user || !player.favorites) return false;
-    return player.favorites.includes(user._id);
+    return player.isFavorite || false;
   };
 
   const getOverallColor = (overall) => {
-    if (overall >= 85) return '#FFD700'; // Gold
-    if (overall >= 80) return '#00C853'; // Green
-    if (overall >= 75) return '#2196F3'; // Blue
-    if (overall >= 70) return '#C0C0C0'; // Silver
-    return '#CD7F32'; // Bronze
+    if (overall >= 85) return '#4caf50';
+    if (overall >= 75) return '#2196f3';
+    if (overall >= 65) return '#ff9800';
+    return '#f44336';
   };
 
-  const filteredPlayers = players.filter(player => {
-    const nameMatch = player?.shortName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                     player?.longName?.toLowerCase().includes(searchQuery.toLowerCase());
-    const positionMatch = positionFilter === 'all' || (player?.positions || []).includes(positionFilter);
-    return nameMatch && positionMatch;
-  }).sort((a, b) => {
-    // Sort by favorite status first
-    const aFavorited = isFavorited(a);
-    const bFavorited = isFavorited(b);
-    if (aFavorited && !bFavorited) return -1;
-    if (!aFavorited && bFavorited) return 1;
-    // Then sort by overall rating
-    return b.overall - a.overall;
-  });
+  const getTierColor = (tier) => {
+    switch(tier) {
+      case 'gold': return '#FFD700';
+      case 'silver': return '#C0C0C0';
+      case 'bronze': return '#CD7F32';
+      default: return '#808080';
+    }
+  };
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
 
   const positions = [
     'GK',
@@ -133,68 +154,115 @@ const Players = () => {
     'LW', 'RW', 'CF', 'ST'
   ];
 
-  const renderStats = (player) => {
-    if (player.positions.includes('GK')) {
-      const gkStats = player.stats?.goalkeeping || {};
-      return Object.entries(gkStats).map(([stat, value]) => (
-        <Grid item xs={4} key={stat}>
-          <Typography variant="caption" component="div" color="text.secondary" sx={{ textTransform: 'capitalize' }}>
-            {stat.replace(/([A-Z])/g, ' $1').trim()}
-          </Typography>
-          <Typography variant="body2" component="div">
-            {value}
-          </Typography>
-        </Grid>
-      ));
-    }
-
-    // For outfield players, show the main stats directly
-    const mainStats = [
-      { name: 'PAC', value: player.pace },
-      { name: 'SHO', value: player.shooting },
-      { name: 'PAS', value: player.passing },
-      { name: 'DRI', value: player.dribbling },
-      { name: 'DEF', value: player.defending },
-      { name: 'PHY', value: player.physical }
-    ];
-
-    return mainStats.map(({ name, value }) => (
-      <Grid item xs={4} key={name}>
-        <Typography variant="caption" component="div" color="text.secondary" sx={{ fontWeight: 'bold' }}>
-          {name}
-        </Typography>
-        <Typography variant="body2" component="div">
-          {value}
-        </Typography>
-      </Grid>
-    ));
+  const getFilteredPlayers = () => {
+    return players
+      .filter(player => {
+        const matchesPosition = positionFilter === 'all' || player.positions.includes(positionFilter);
+        const matchesSearch = !searchQuery || 
+          player.shortName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          player.longName.toLowerCase().includes(searchQuery.toLowerCase());
+        return matchesPosition && matchesSearch;
+      })
+      .sort((a, b) => {
+        // Sort by favorite status first
+        if (a.isFavorite && !b.isFavorite) return -1;
+        if (!a.isFavorite && b.isFavorite) return 1;
+        // Then sort by overall rating
+        return b.overall - a.overall;
+      });
   };
 
   if (loading) {
     return (
-      <Container maxWidth="lg" sx={{ py: 4, display: 'flex', justifyContent: 'center' }}>
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
         <CircularProgress />
-      </Container>
-    );
-  }
-
-  if (error) {
-    return (
-      <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Alert severity="error" sx={{ mb: 2 }}>
-          Error loading players: {error}
-        </Alert>
-        <Button variant="contained" onClick={fetchPlayers}>
-          Retry
-        </Button>
-      </Container>
+      </Box>
     );
   }
 
   return (
-    <Container maxWidth="lg" sx={{ py: 4 }}>
-      <Box sx={{ mb: 4 }}>
-        <Grid container spacing={2} alignItems="center">
+    <Container maxWidth="lg">
+      {/* Header */}
+      <Box sx={{ mt: 4, mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Box>
+          <Typography variant="h4" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold' }}>
+            Players Database
+          </Typography>
+          <Typography variant="subtitle1" color="textSecondary">
+            Browse and favorite players for your team
+          </Typography>
+        </Box>
+        {!user && (
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<LoginIcon />}
+            onClick={() => navigate('/login')}
+          >
+            Login to Favorite Players
+          </Button>
+        )}
+      </Box>
+
+      {/* Error Alert */}
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
+          {error}
+        </Alert>
+      )}
+
+      {/* Stats Overview */}
+      <Paper 
+        elevation={3}
+        sx={{ 
+          p: 3,
+          background: 'linear-gradient(to right, #ffffff, #f5f5f5)',
+          borderRadius: 2,
+          mb: 3
+        }}
+      >
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={4}>
+            <Box sx={{ textAlign: 'center' }}>
+              <PlayerIcon sx={{ fontSize: 40, color: 'primary.main', mb: 1 }} />
+              <Typography variant="h6">Total Players</Typography>
+              <Typography variant="h4" color="primary">
+                {players.length}
+              </Typography>
+            </Box>
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <Box sx={{ textAlign: 'center' }}>
+              <TrophyIcon sx={{ fontSize: 40, color: 'success.main', mb: 1 }} />
+              <Typography variant="h6">Elite Players</Typography>
+              <Typography variant="h4" color="success.main">
+                {players.filter(p => p.overall >= 85).length}
+              </Typography>
+            </Box>
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <Box sx={{ textAlign: 'center' }}>
+              <SpeedIcon sx={{ fontSize: 40, color: 'warning.main', mb: 1 }} />
+              <Typography variant="h6">Average Rating</Typography>
+              <Typography variant="h4" color="warning.main">
+                {Math.round(players.reduce((acc, p) => acc + p.overall, 0) / players.length)}
+              </Typography>
+            </Box>
+          </Grid>
+        </Grid>
+      </Paper>
+
+      {/* Filters */}
+      <Paper 
+        elevation={3} 
+        sx={{ 
+          p: 3, 
+          mb: 3,
+          background: 'linear-gradient(to right, #ffffff, #f5f5f5)',
+          borderRadius: 2
+        }}
+      >
+        <Grid container spacing={3}>
           <Grid item xs={12} md={6}>
             <TextField
               fullWidth
@@ -227,30 +295,68 @@ const Players = () => {
             </FormControl>
           </Grid>
         </Grid>
-      </Box>
+      </Paper>
 
-      <Grid container spacing={2}>
-        {filteredPlayers.map((player) => (
+      {/* Players Grid */}
+      <Grid container spacing={3}>
+        {getFilteredPlayers().map((player) => (
           <Grid item xs={12} sm={6} md={4} key={player._id}>
-            <Card>
-              <CardContent>
-                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-                  <Box>
-                    <Typography variant="h6" component="div">
+            <Paper 
+              elevation={3}
+              sx={{ 
+                position: 'relative',
+                background: 'linear-gradient(to bottom right, #ffffff, #f5f5f5)',
+                borderRadius: 2,
+                overflow: 'hidden',
+                transition: 'transform 0.2s',
+                '&:hover': {
+                  transform: 'translateY(-4px)'
+                }
+              }}
+            >
+              <Box 
+                sx={{ 
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: '4px',
+                  background: getTierColor(player.tier)
+                }} 
+              />
+              <Box sx={{ p: 2 }}>
+                <Box sx={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', mb: 2 }}>
+                  <Box sx={{ flex: 1, pr: 2 }}>
+                    <Typography variant="h6" gutterBottom>
                       {player.shortName}
                     </Typography>
-                    <Typography variant="body2" color="text.secondary">
+                    <Typography variant="body2" color="textSecondary" gutterBottom>
                       {player.longName}
                     </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                      <Chip
+                        label={player.tier.toUpperCase()}
+                        size="small"
+                        sx={{
+                          bgcolor: getTierColor(player.tier),
+                          color: player.tier === 'gold' ? 'black' : 'white',
+                          fontWeight: 'bold'
+                        }}
+                      />
+                      <Typography variant="body2" color="textSecondary">
+                        Min Bid: {formatCurrency(player.minimumBid)}
+                      </Typography>
+                    </Box>
                   </Box>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                    <IconButton
+                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                    <IconButton 
                       onClick={() => handleFavorite(player._id)}
-                      color="primary"
+                      color={isFavorited(player) ? "error" : "default"}
                       size="small"
                       sx={{ 
-                        '& .MuiSvgIcon-root': {
-                          color: isFavorited(player) ? 'red' : 'inherit'
+                        backgroundColor: 'rgba(255,255,255,0.8)',
+                        '&:hover': {
+                          backgroundColor: 'rgba(255,255,255,0.9)'
                         }
                       }}
                     >
@@ -258,9 +364,10 @@ const Players = () => {
                     </IconButton>
                     <Avatar
                       sx={{
-                        bgcolor: getOverallColor(player.overall),
+                        bgcolor: getTierColor(player.tier),
                         width: 56,
-                        height: 56
+                        height: 56,
+                        color: player.tier === 'gold' ? 'black' : 'white'
                       }}
                     >
                       {player.overall}
@@ -268,14 +375,41 @@ const Players = () => {
                   </Box>
                 </Box>
 
+                {/* Stats Chart */}
+                <Box sx={{ height: 200, mb: 2 }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <RadarChart 
+                      data={[
+                        { name: 'PAC', value: player.pace },
+                        { name: 'SHO', value: player.shooting },
+                        { name: 'PAS', value: player.passing },
+                        { name: 'DRI', value: player.dribbling },
+                        { name: 'DEF', value: player.defending },
+                        { name: 'PHY', value: player.physical }
+                      ]} 
+                      margin={{ top: 0, right: 30, bottom: 0, left: 30 }}
+                    >
+                      <PolarGrid />
+                      <PolarAngleAxis dataKey="name" />
+                      <Radar
+                        name="Stats"
+                        dataKey="value"
+                        stroke={getTierColor(player.tier)}
+                        fill={getTierColor(player.tier)}
+                        fillOpacity={0.3}
+                      />
+                    </RadarChart>
+                  </ResponsiveContainer>
+                </Box>
+
                 <Box sx={{ mb: 2 }}>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="textSecondary">
                     Club: {player.club}
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="textSecondary">
                     Nationality: {player.nationality}
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
+                  <Typography variant="body2" color="textSecondary">
                     Age: {player.age}
                   </Typography>
                 </Box>
@@ -286,32 +420,18 @@ const Players = () => {
                       key={position}
                       label={position}
                       size="small"
+                      color={position === player.mainPosition ? "primary" : "default"}
                       sx={{
-                        backgroundColor: position === player.mainPosition ? '#1976d2' : 'default',
-                        color: position === player.mainPosition ? 'white' : 'default'
+                        fontWeight: position === player.mainPosition ? 'bold' : 'normal'
                       }}
                     />
                   ))}
                 </Box>
-
-                <Box sx={{ mt: 2 }}>
-                  <Grid container spacing={1}>
-                    {renderStats(player)}
-                  </Grid>
-                </Box>
-              </CardContent>
-            </Card>
+              </Box>
+            </Paper>
           </Grid>
         ))}
       </Grid>
-      
-      <Box sx={{ mt: 4, textAlign: 'center' }}>
-        <Typography variant="body1" color="text.secondary">
-          Found {filteredPlayers.length} player{filteredPlayers.length !== 1 ? 's' : ''}
-          {searchQuery && ` matching "${searchQuery}"`}
-          {positionFilter !== 'all' && ` in position ${positionFilter}`}
-        </Typography>
-      </Box>
     </Container>
   );
 };

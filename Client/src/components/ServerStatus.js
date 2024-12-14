@@ -5,6 +5,7 @@ import { useUser } from '../context/UserContext';
 
 const ServerStatus = () => {
   const [isConnected, setIsConnected] = useState(false);
+  const [isVisible, setIsVisible] = useState(true);
   const { user } = useUser();
 
   useEffect(() => {
@@ -12,17 +13,24 @@ const ServerStatus = () => {
 
     const handleConnect = () => {
       setIsConnected(true);
+      setIsVisible(true);
       if (user?.id) {
         socket.emit('userConnected', user.id);
       }
+      // Auto-hide after 3 seconds
+      setTimeout(() => setIsVisible(false), 3000);
     };
 
     const handleDisconnect = () => {
       setIsConnected(false);
+      setIsVisible(true); // Always show when disconnected
     };
 
     // Set initial connection status
     setIsConnected(socket.connected);
+    if (socket.connected) {
+      setTimeout(() => setIsVisible(false), 3000);
+    }
 
     // Set up event listeners
     socket.on('connect', handleConnect);
@@ -35,12 +43,22 @@ const ServerStatus = () => {
     };
   }, [user]);
 
+  const handleMouseEnter = () => {
+    setIsVisible(true);
+  };
+
+  const handleMouseLeave = () => {
+    if (isConnected) {
+      setIsVisible(false);
+    }
+  };
+
   return (
     <Paper
       elevation={3}
       sx={{
         position: 'fixed',
-        bottom: 0,
+        bottom: isVisible ? 0 : -48,
         left: 0,
         right: 0,
         height: '48px',
@@ -51,8 +69,14 @@ const ServerStatus = () => {
         borderTop: 1,
         borderColor: 'divider',
         zIndex: 9999,
-        px: 2
+        px: 2,
+        transition: 'bottom 0.3s ease-in-out',
+        '&:hover': {
+          bottom: 0
+        }
       }}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       <Box sx={{ display: 'flex', alignItems: 'center' }}>
         <div

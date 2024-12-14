@@ -1,12 +1,35 @@
 const express = require('express');
 const router = express.Router();
 const Player = require('../models/Player');
+const User = require('../models/User');
+const auth = require('../middleware/auth'); // Assuming auth middleware is defined in this file
+
+// Helper function to get tier and minimum bid
+const getPlayerTierInfo = (overall) => {
+  let tier, minimumBid;
+  
+  if (overall >= 85) {
+    tier = 'gold';
+    minimumBid = 50000;
+  } else if (overall >= 75) {
+    tier = 'silver';
+    minimumBid = 30000;
+  } else if (overall >= 65) {
+    tier = 'bronze';
+    minimumBid = 10000;
+  } else {
+    tier = 'extra';
+    minimumBid = 0;
+  }
+
+  return { tier, minimumBid };
+};
 
 // Get all players with optional filters
-router.get('/', async (req, res) => {
+router.get('/', auth, async (req, res) => {
   try {
-    console.log('GET /api/players - Received request');
     const { position, minOverall, maxOverall, search } = req.query;
+    const userId = req.user._id;
     
     let query = {};
     
@@ -30,17 +53,27 @@ router.get('/', async (req, res) => {
       ];
     }
 
-    console.log('Query:', JSON.stringify(query));
+    // Get user's favorites
+    const user = await User.findById(userId).select('favorites');
+    const userFavorites = user?.favorites || [];
+
+    // Get players and add tier, minimumBid, and isFavorite
     const players = await Player.find(query).sort({ overall: -1 });
-    console.log(`Found ${players.length} players`);
-    res.json(players);
-  } catch (err) {
-    console.error('Error in GET /api/players:', err);
-    res.status(500).json({ 
-      message: 'Server error', 
-      error: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined 
+    const playersWithInfo = players.map(player => {
+      const playerObj = player.toObject();
+      const { tier, minimumBid } = getPlayerTierInfo(playerObj.overall);
+      return {
+        ...playerObj,
+        tier,
+        minimumBid,
+        isFavorite: userFavorites.includes(player._id)
+      };
     });
+
+    res.json(playersWithInfo);
+  } catch (error) {
+    console.error('Error in GET /api/players:', error);
+    res.status(500).json({ message: 'Failed to fetch players' });
   }
 });
 
@@ -83,64 +116,76 @@ router.get('/meta/positions', async (req, res) => {
   }
 });
 
-// Toggle favorite status for a player
-router.post('/:id/favorite', async (req, res) => {
+// Get players by owner
+router.get('/owner/:userId', async (req, res) => {
   try {
-    const { id } = req.params;
-    const { userId } = req.body;
+    const { userId } = req.params;
+    const players = await Player.find({ owner: userId });
+    res.json(players);
+  } catch (err) {
+    console.error('Error fetching players by owner:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
 
-    console.log('Favorite request:', { playerId: id, userId, body: req.body });
+// POST /api/players/:id/favorite - Toggle favorite status for a player
+router.post('/:id/favorite', auth, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const playerId = req.params.id;
 
-    if (!userId) {
-      console.error('Missing userId in request body');
-      return res.status(400).json({ 
-        message: 'User ID is required',
-        receivedBody: req.body 
-      });
+    // Find the user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
     }
 
-    const player = await Player.findById(id);
+    // Initialize favorites array if it doesn't exist
+    if (!user.favorites) {
+      user.favorites = [];
+    }
+
+    // Toggle favorite status
+    const favoriteIndex = user.favorites.findIndex(id => id.toString() === playerId);
+    if (favoriteIndex === -1) {
+      user.favorites.push(playerId);
+    } else {
+      user.favorites.splice(favoriteIndex, 1);
+    }
+
+    // Save the updated user
+    await user.save();
+
+    res.json({
+      success: true,
+      isFavorite: favoriteIndex === -1
+    });
+  } catch (error) {
+    console.error('Error in favorite player:', error);
+    res.status(500).json({ message: 'Server error while updating favorites' });
+  }
+});
+
+// Update player's substitute status
+router.patch('/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isSubstitute } = req.body;
+
+    const player = await Player.findByIdAndUpdate(
+      id,
+      { isSubstitute },
+      { new: true }
+    );
+
     if (!player) {
-      console.error('Player not found:', id);
       return res.status(404).json({ message: 'Player not found' });
     }
 
-    console.log('Current favorites:', player.favorites);
-
-    // Initialize favorites array if it doesn't exist
-    if (!player.favorites) {
-      player.favorites = [];
-    }
-
-    // Convert favorites to strings for comparison
-    const favorites = player.favorites.map(f => f.toString());
-    const favoriteIndex = favorites.indexOf(userId.toString());
-
-    if (favoriteIndex === -1) {
-      // Add to favorites
-      console.log('Adding to favorites:', userId);
-      player.favorites.push(userId);
-    } else {
-      // Remove from favorites
-      console.log('Removing from favorites:', userId);
-      player.favorites.splice(favoriteIndex, 1);
-    }
-
-    const savedPlayer = await player.save();
-    console.log('Updated favorites:', savedPlayer.favorites);
-
-    res.json({ 
-      favorites: savedPlayer.favorites,
-      message: favoriteIndex === -1 ? 'Added to favorites' : 'Removed from favorites',
-      isFavorited: favoriteIndex === -1
-    });
+    res.json(player);
   } catch (err) {
-    console.error('Error toggling favorite:', err);
-    res.status(500).json({ 
-      message: 'Server error', 
-      error: err.message,
-      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-    });
+    console.error('Error updating player:', err);
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 

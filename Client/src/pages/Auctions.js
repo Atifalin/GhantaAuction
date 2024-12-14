@@ -16,7 +16,11 @@ import axios from 'axios';
 
 const Auctions = () => {
   const navigate = useNavigate();
-  const [auctions, setAuctions] = useState([]);
+  const [auctions, setAuctions] = useState({
+    active: [],
+    pending: [],
+    completed: []
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [user] = useState(() => {
@@ -62,6 +66,10 @@ const Auctions = () => {
     }
   };
 
+  const handleViewAuction = (auctionId) => {
+    navigate(`/auction/${auctionId}`);
+  };
+
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
@@ -73,12 +81,73 @@ const Auctions = () => {
   if (error) {
     return (
       <Container>
-        <Alert severity="error" sx={{ mt: 2 }}>
+        <Alert 
+          severity="error" 
+          sx={{ 
+            position: 'fixed', 
+            top: '20px', 
+            left: '50%', 
+            transform: 'translateX(-50%)',
+            zIndex: 9999,
+            minWidth: '300px',
+            maxWidth: '90%'
+          }}
+        >
           {error}
         </Alert>
       </Container>
     );
   }
+
+  const renderAuctionCard = (auction, showJoin = true) => (
+    <Grid item xs={12} sm={6} md={4} key={auction._id}>
+      <Card>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            {auction.name}
+          </Typography>
+          <Typography color="textSecondary" gutterBottom>
+            Host: {auction.host?.username}
+          </Typography>
+          <Box display="flex" alignItems="center" gap={1} mb={2}>
+            <Chip 
+              label={auction.status.toUpperCase()} 
+              color={
+                auction.status === 'active' ? 'success' : 
+                auction.status === 'pending' ? 'primary' : 
+                auction.status === 'completed' ? 'default' : 
+                'primary'
+              } 
+              size="small" 
+            />
+            <Typography variant="body2">
+              {auction.participants?.length || 0} participants
+            </Typography>
+          </Box>
+          <Box display="flex" gap={1}>
+            <Button
+              variant="contained"
+              color="primary"
+              fullWidth
+              onClick={() => handleViewAuction(auction._id)}
+            >
+              VIEW
+            </Button>
+            {showJoin && !auction.participants?.some(p => p._id === user.id) && (
+              <Button
+                variant="outlined"
+                color="primary"
+                fullWidth
+                onClick={() => handleJoinAuction(auction._id)}
+              >
+                JOIN
+              </Button>
+            )}
+          </Box>
+        </CardContent>
+      </Card>
+    </Grid>
+  );
 
   return (
     <Container maxWidth="lg">
@@ -95,93 +164,35 @@ const Auctions = () => {
         </Button>
       </Box>
 
-      <Grid container spacing={3}>
-        {auctions.map((auction) => (
-          <Grid item xs={12} sm={6} md={4} key={auction._id}>
-            <Card>
-              <CardContent>
-                <Box display="flex" justifyContent="space-between" alignItems="flex-start">
-                  <Typography variant="h6" gutterBottom>
-                    {auction.name}
-                  </Typography>
-                  <Chip
-                    label={auction.status.toUpperCase()}
-                    color={auction.status === 'active' ? 'success' : 'default'}
-                    size="small"
-                  />
-                </Box>
-
-                <Typography color="text.secondary" gutterBottom>
-                  Host: {auction.host.username}
-                </Typography>
-
-                <Box display="flex" gap={1} mb={2}>
-                  <Chip
-                    label={`${auction.participants.length} Players`}
-                    variant="outlined"
-                    size="small"
-                  />
-                  <Chip
-                    label={`Budget: $${auction.budget.toLocaleString()}`}
-                    variant="outlined"
-                    size="small"
-                  />
-                </Box>
-
-                {auction.status === 'waiting' && (
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Typography variant="body2" color="text.secondary">
-                      {auction.availablePlayers?.length || 0} players remaining
-                    </Typography>
-                    <Button
-                      variant="contained"
-                      size="small"
-                      onClick={() => handleJoinAuction(auction._id)}
-                      disabled={auction.participants.some(p => p._id === user.id)}
-                    >
-                      {auction.participants.some(p => p._id === user.id) ? 'Joined' : 'Join'}
-                    </Button>
-                  </Box>
-                )}
-
-                {auction.status === 'active' && (
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Typography variant="body2" color="text.secondary">
-                      Auction in progress
-                    </Typography>
-                    <Button
-                      variant="contained"
-                      size="small"
-                      onClick={() => navigate(`/auction/${auction._id}`)}
-                      disabled={!auction.participants.some(p => p._id === user.id)}
-                    >
-                      View Auction
-                    </Button>
-                  </Box>
-                )}
-
-                {auction.status === 'completed' && (
-                  <Box display="flex" justifyContent="center">
-                    <Typography variant="body2" color="text.secondary">
-                      Auction completed
-                    </Typography>
-                  </Box>
-                )}
-              </CardContent>
-            </Card>
+      {/* Active & Pending Auctions */}
+      {(auctions.active.length > 0 || auctions.pending.length > 0) && (
+        <Box mb={4}>
+          <Typography variant="h5" color="primary" gutterBottom>
+            Active & Pending Auctions
+          </Typography>
+          <Grid container spacing={3}>
+            {[...auctions.active, ...auctions.pending].map((auction) => renderAuctionCard(auction))}
           </Grid>
-        ))}
+        </Box>
+      )}
 
-        {auctions.length === 0 && (
-          <Grid item xs={12}>
-            <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
-              <Typography variant="h6" color="text.secondary">
-                No auctions available
-              </Typography>
-            </Box>
+      {/* Completed Auctions */}
+      {auctions.completed.length > 0 && (
+        <Box>
+          <Typography variant="h5" color="text.secondary" gutterBottom>
+            Completed Auctions
+          </Typography>
+          <Grid container spacing={3}>
+            {auctions.completed.map((auction) => renderAuctionCard(auction, false))}
           </Grid>
-        )}
-      </Grid>
+        </Box>
+      )}
+
+      {Object.values(auctions).every(arr => arr.length === 0) && (
+        <Typography color="text.secondary" align="center" variant="h6">
+          No auctions available
+        </Typography>
+      )}
     </Container>
   );
 };

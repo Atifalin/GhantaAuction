@@ -5,116 +5,243 @@ import {
   Paper,
   Typography,
   Box,
-  Card,
-  CardContent,
   IconButton,
   Button,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemSecondaryAction,
+  CircularProgress,
+  Alert,
+  Chip
 } from '@mui/material';
 import {
   SwapVert as SwapIcon,
   Delete as DeleteIcon,
+  SportsSoccer as PlayerIcon,
+  EmojiEvents as TrophyIcon,
+  Groups as TeamIcon
 } from '@mui/icons-material';
 import axios from 'axios';
+import { useUser } from '../context/UserContext';
 
 const TeamManagement = () => {
   const [team, setTeam] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState(null);
-  const [substitutes, setSubstitutes] = useState([]);
-  const user = JSON.parse(localStorage.getItem('user'));
+  const { user } = useUser();
 
   useEffect(() => {
+    if (!user) {
+      setError('Please log in to view your team');
+      setLoading(false);
+      return;
+    }
     fetchTeam();
-  }, []);
+  }, [user]);
 
   const fetchTeam = async () => {
     try {
-      const response = await axios.get(`http://localhost:5000/api/players?owner=${user.id}`);
-      const players = response.data;
-      setTeam(players.filter(p => !p.isSubstitute));
-      setSubstitutes(players.filter(p => p.isSubstitute));
+      setLoading(true);
+      setError(null);
+      
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      const response = await axios.get(`/api/users/${user.id}/team`, {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      
+      if (Array.isArray(response.data)) {
+        setTeam(response.data);
+      } else {
+        throw new Error('Invalid response format');
+      }
     } catch (error) {
       console.error('Error fetching team:', error);
+      setError(error.response?.data?.message || 'Failed to fetch team data');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleSwapPlayer = (player) => {
-    setSelectedPlayer(player);
-    setOpenDialog(true);
+  const handleMovePlayer = async (playerId, isSubstitute) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      await axios.patch(
+        `/api/team/${playerId}`,
+        { isSubstitute },
+        {
+          headers: { 
+            'Authorization': `Bearer ${token}`
+          }
+        }
+      );
+      
+      fetchTeam();
+    } catch (error) {
+      console.error('Error moving player:', error);
+      setError(error.response?.data?.message || 'Failed to update player status');
+    }
   };
 
-  const handleConfirmSwap = async (substituteId) => {
+  const handleSwapPlayers = async (player1Id, player2Id) => {
     try {
-      await axios.post(`http://localhost:5000/api/players/swap`, {
-        playerId: selectedPlayer._id,
-        substituteId,
-      });
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      await axios.post(
+        '/api/team/swap',
+        {
+          playerId: player1Id,
+          substituteId: player2Id
+        },
+        {
+          headers: { 
+            'Authorization': `Bearer ${token}`
+          }
+        }
+      );
+      
+      setOpenDialog(false);
       fetchTeam();
     } catch (error) {
       console.error('Error swapping players:', error);
+      setError(error.response?.data?.message || 'Failed to swap players');
     }
-    setOpenDialog(false);
   };
 
-  const renderPlayerCard = (player, isSubstitute = false) => (
-    <Card sx={{ mb: 2 }}>
-      <CardContent>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Typography variant="h6">
-            {player.name}
-          </Typography>
-          <Box>
-            {!isSubstitute && (
-              <IconButton
-                size="small"
-                onClick={() => handleSwapPlayer(player)}
-                title="Swap with substitute"
-              >
-                <SwapIcon />
-              </IconButton>
-            )}
-          </Box>
-        </Box>
-        <Typography color="text.secondary" gutterBottom>
-          {player.position}
-        </Typography>
-        <Grid container spacing={1}>
-          <Grid item xs={6}>
-            <Typography variant="body2">Overall: {player.overall}</Typography>
-          </Grid>
-          {Object.entries(player.stats).map(([stat, value]) => (
-            <Grid item xs={6} key={stat}>
-              <Typography variant="body2">
-                {stat.charAt(0).toUpperCase() + stat.slice(1)}: {value}
-              </Typography>
-            </Grid>
-          ))}
-        </Grid>
-      </CardContent>
-    </Card>
-  );
+  if (loading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  const mainTeam = team.filter(player => !player.isSubstitute);
+  const substitutes = team.filter(player => player.isSubstitute);
 
   return (
     <Container maxWidth="lg">
+      <Box sx={{ mt: 4, mb: 4 }}>
+        <Typography variant="h4" gutterBottom sx={{ color: 'primary.main', fontWeight: 'bold' }}>
+          Team Management
+        </Typography>
+        <Typography variant="subtitle1" color="textSecondary">
+          Manage your team lineup and substitutes
+        </Typography>
+      </Box>
+
       <Grid container spacing={3}>
-        {/* Main Squad */}
+        {/* Team Summary */}
+        <Grid item xs={12}>
+          <Paper 
+            elevation={3}
+            sx={{ 
+              p: 3,
+              background: 'linear-gradient(to right, #ffffff, #f5f5f5)',
+              borderRadius: 2,
+              mb: 3
+            }}
+          >
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={4}>
+                <Box sx={{ textAlign: 'center' }}>
+                  <TeamIcon sx={{ fontSize: 40, color: 'primary.main', mb: 1 }} />
+                  <Typography variant="h6">Squad Size</Typography>
+                  <Typography variant="h4" color="primary">
+                    {team.length}
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <Box sx={{ textAlign: 'center' }}>
+                  <PlayerIcon sx={{ fontSize: 40, color: 'success.main', mb: 1 }} />
+                  <Typography variant="h6">Starting XI</Typography>
+                  <Typography variant="h4" color="success.main">
+                    {mainTeam.length}
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <Box sx={{ textAlign: 'center' }}>
+                  <SwapIcon sx={{ fontSize: 40, color: 'warning.main', mb: 1 }} />
+                  <Typography variant="h6">Substitutes</Typography>
+                  <Typography variant="h4" color="warning.main">
+                    {substitutes.length}
+                  </Typography>
+                </Box>
+              </Grid>
+            </Grid>
+          </Paper>
+        </Grid>
+
+        {/* Main Team */}
         <Grid item xs={12} md={8}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="h5" gutterBottom>
-              Main Squad
+          <Paper 
+            elevation={3}
+            sx={{ 
+              p: 3,
+              height: '100%',
+              background: 'linear-gradient(to bottom right, #ffffff, #f5f5f5)',
+              borderRadius: 2
+            }}
+          >
+            <Typography variant="h6" gutterBottom sx={{ color: 'success.main', fontWeight: 'bold' }}>
+              Starting XI
             </Typography>
             <Grid container spacing={2}>
-              {team.map((player) => (
-                <Grid item xs={12} sm={6} key={player._id}>
-                  {renderPlayerCard(player)}
+              {mainTeam.map((player) => (
+                <Grid item xs={12} key={player._id}>
+                  <Paper 
+                    elevation={1}
+                    sx={{
+                      p: 2,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      background: 'rgba(255, 255, 255, 0.9)',
+                      '&:hover': {
+                        bgcolor: 'rgba(0, 0, 0, 0.02)'
+                      }
+                    }}
+                  >
+                    <Box>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 'medium' }}>
+                        {player.shortName}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        {player.mainPosition} • OVR {player.overall}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Chip 
+                        label={`₹${player.amount?.toLocaleString()}`}
+                        color="primary"
+                        size="small"
+                      />
+                      <IconButton
+                        size="small"
+                        onClick={() => handleMovePlayer(player._id, true)}
+                        color="warning"
+                      >
+                        <SwapIcon />
+                      </IconButton>
+                    </Box>
+                  </Paper>
                 </Grid>
               ))}
             </Grid>
@@ -123,38 +250,85 @@ const TeamManagement = () => {
 
         {/* Substitutes */}
         <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="h5" gutterBottom>
+          <Paper 
+            elevation={3}
+            sx={{ 
+              p: 3,
+              height: '100%',
+              background: 'linear-gradient(to bottom right, #ffffff, #f5f5f5)',
+              borderRadius: 2
+            }}
+          >
+            <Typography variant="h6" gutterBottom sx={{ color: 'warning.main', fontWeight: 'bold' }}>
               Substitutes
             </Typography>
-            {substitutes.map((player) => renderPlayerCard(player, true))}
+            <Grid container spacing={2}>
+              {substitutes.map((player) => (
+                <Grid item xs={12} key={player._id}>
+                  <Paper 
+                    elevation={1}
+                    sx={{
+                      p: 2,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      background: 'rgba(255, 255, 255, 0.9)',
+                      '&:hover': {
+                        bgcolor: 'rgba(0, 0, 0, 0.02)'
+                      }
+                    }}
+                  >
+                    <Box>
+                      <Typography variant="subtitle1" sx={{ fontWeight: 'medium' }}>
+                        {player.shortName}
+                      </Typography>
+                      <Typography variant="body2" color="textSecondary">
+                        {player.mainPosition} • OVR {player.overall}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Chip 
+                        label={`₹${player.amount?.toLocaleString()}`}
+                        color="primary"
+                        size="small"
+                      />
+                      <IconButton
+                        size="small"
+                        onClick={() => handleMovePlayer(player._id, false)}
+                        color="success"
+                      >
+                        <SwapIcon />
+                      </IconButton>
+                    </Box>
+                  </Paper>
+                </Grid>
+              ))}
+            </Grid>
           </Paper>
         </Grid>
       </Grid>
 
-      {/* Swap Dialog */}
+      {error && (
+        <Alert 
+          severity="error" 
+          onClose={() => setError(null)}
+          sx={{ 
+            position: 'fixed', 
+            bottom: 16, 
+            right: 16,
+            zIndex: 9999
+          }}
+        >
+          {error}
+        </Alert>
+      )}
+
       <Dialog open={openDialog} onClose={() => setOpenDialog(false)}>
-        <DialogTitle>Select Substitute</DialogTitle>
+        <DialogTitle>Swap Players</DialogTitle>
         <DialogContent>
-          <List>
-            {substitutes.map((sub) => (
-              <ListItem key={sub._id}>
-                <ListItemText
-                  primary={sub.name}
-                  secondary={`${sub.position} - Overall: ${sub.overall}`}
-                />
-                <ListItemSecondaryAction>
-                  <Button
-                    variant="contained"
-                    size="small"
-                    onClick={() => handleConfirmSwap(sub._id)}
-                  >
-                    Swap
-                  </Button>
-                </ListItemSecondaryAction>
-              </ListItem>
-            ))}
-          </List>
+          <Typography>
+            Select a player to swap with {selectedPlayer?.shortName}
+          </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpenDialog(false)}>Cancel</Button>

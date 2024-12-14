@@ -22,6 +22,19 @@ A real-time multiplayer auction platform for team selection and player bidding, 
 - Auction room functionality with participant management
 - Budget tracking and validation
 - Player shuffling for fair distribution
+- Enhanced host controls for auction management
+- Player tier system (Gold/Silver/Bronze) with visual indicators
+- Quick bid functionality with increment buttons
+- Real-time countdown timer with visual alerts
+- Comprehensive auction stats tracking
+
+### Player Management
+- Tier-based player categorization (Gold/Silver/Bronze)
+- Detailed player statistics and attributes
+- Visual skill representation with radar charts
+- Position-based filtering and search
+- Minimum bid requirements per player
+- Player favoriting system
 
 ### Dashboard Features
 - User status and information display
@@ -29,6 +42,8 @@ A real-time multiplayer auction platform for team selection and player bidding, 
 - Team management interface
 - Budget tracking
 - Real-time updates via WebSocket
+- Auction progress statistics
+- Completed players tracking
 
 ## 🛠 Technical Stack
 
@@ -39,6 +54,7 @@ A real-time multiplayer auction platform for team selection and player bidding, 
 - **Socket.io-client**: Real-time communication
 - **Axios**: HTTP client
 - **React Router**: Navigation
+- **Recharts**: Data visualization
 
 ### Backend
 - **Node.js**: Runtime environment
@@ -49,137 +65,65 @@ A real-time multiplayer auction platform for team selection and player bidding, 
 - **JWT**: Authentication
 - **bcryptjs**: Password hashing
 
-## 🏗 Architecture
+## 🎨 UI/UX Features
 
-### Frontend Architecture
-```
-Client/
-├── src/
-│   ├── components/      # Reusable UI components
-│   ├── context/        # React Context providers
-│   ├── pages/          # Main application views
-│   ├── services/       # API and Socket services
-│   └── utils/          # Helper functions
-```
+### Auction Interface
+- Real-time countdown timer
+- Tier-based player cards with visual indicators
+- Quick bid buttons for common increments
+- Custom bid input with validation
+- Host control panel for auction management
+- Player statistics visualization
+- Auction progress tracking
 
-### Backend Architecture
-```
-Server/
-├── models/            # MongoDB schemas
-├── routes/            # API endpoints
-├── middleware/        # Custom middleware
-├── socket/           # WebSocket handlers
-└── utils/            # Helper functions
-```
+### Player Cards
+- Tier-specific color coding
+- Skill rating visualization
+- Position indicators
+- Minimum bid display
+- Overall rating badge
+- Interactive hover effects
 
-## 🔌 WebSocket Events
+## 🔄 Recent Updates
 
-### Server Events
-- `userConnected`: User login notification
-- `userStatusUpdate`: User status changes
-- `auctionUpdate`: Auction state changes
-- `joinAuctionRoom`: Join auction space
-- `leaveAuctionRoom`: Leave auction space
+### UI Enhancements
+- Redesigned player cards with tier-based styling
+- Improved auction interface layout
+- Enhanced visual feedback for bidding
+- Real-time timer with color-coded alerts
+- Better organization of player information
 
-### Client Events
-- `auctionUpdate`: Handle auction updates
-- `userStatusUpdate`: Handle user status changes
-- `teamUpdate`: Handle team changes
+### Functionality Improvements
+- Enhanced host controls for auction management
+- Implemented tier system for player categorization
+- Added quick bid functionality
+- Improved auction state management
+- Better budget tracking and validation
 
-## 🔒 Authentication Flow
-
-1. User selects predefined username
-2. Server validates user and generates JWT
-3. Client stores token in localStorage
-4. Socket connection established with token
-5. Real-time status updates begin
-
-## 💾 Data Models
-
-### User Model
-```javascript
-{
-  username: String,
-  status: String,
-  emoji: String,
-  color: String,
-  budget: Number
-}
-```
-
-### Auction Model
-```javascript
-{
-  name: String,
-  budget: Number,
-  host: User,
-  participants: [User],
-  status: String,
-  availablePlayers: [Player],
-  currentPlayer: {
-    player: Player,
-    currentBid: {
-      amount: Number,
-      bidder: User
-    }
-  }
-}
-```
+### System Stability
+- Fixed host persistence after server restart
+- Improved real-time synchronization
+- Enhanced error handling
+- Better state management for auction lifecycle
 
 ## 🚀 Getting Started
 
 1. Clone the repository
-```bash
-git clone https://github.com/yourusername/ghanta-auction.git
-```
+2. Install dependencies:
+   ```bash
+   cd Client && npm install
+   cd ../Server && npm install
+   ```
+3. Set up environment variables
+4. Start the development servers:
+   ```bash
+   # Start backend server
+   cd Server && npm start
 
-2. Install dependencies
-```bash
-# Install server dependencies
-cd server
-npm install
-
-# Install client dependencies
-cd ../client
-npm install
-```
-
-3. Start the development servers
-```bash
-# Start server (from server directory)
-npm run dev
-
-# Start client (from client directory)
-npm start
-```
-
-4. Access the application
-- Frontend: http://localhost:3000
-- Backend: http://localhost:5000
-
-## 🔧 Configuration
-
-### Environment Variables
-```env
-PORT=5000
-MONGODB_URI=mongodb://localhost:27017/ghanta
-JWT_SECRET=your_jwt_secret
-```
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+   # Start frontend client
+   cd Client && npm start
+   ```
 
 ## 📝 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- Material-UI for the beautiful components
-- Socket.io for real-time capabilities
-- MongoDB for the flexible database solution
+This project is licensed under the MIT License - see the LICENSE file for details.

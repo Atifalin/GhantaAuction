@@ -3,8 +3,10 @@ const router = express.Router();
 const Auction = require('../models/Auction');
 const User = require('../models/User');
 const Player = require('../models/Player');
+const AuctionPlayer = require('../models/AuctionPlayer');
 const auth = require('../middleware/auth');
 const { getIO, broadcastAuctionUpdate } = require('../socket');
+const { getPlayerTierInfo } = require('../utils/playerTiers');
 
 // Create auction session
 router.post('/', auth, async (req, res) => {
@@ -49,7 +51,7 @@ router.post('/', auth, async (req, res) => {
       host: hostId,
       participants: [hostId],
       availablePlayers: shuffledPlayers.map(p => p._id),
-      status: 'waiting',
+      status: 'pending',
       round: 1,
       skipVotes: [], // Add array to track skip votes
       currentPlayer: {
@@ -75,13 +77,29 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
-// Get all active auctions
+// Get all auctions
 router.get('/', async (req, res) => {
   try {
-    const auctions = await Auction.find({ status: { $ne: 'completed' } })
+    const auctions = await Auction.find()
       .populate('host', 'username emoji color')
-      .populate('participants', 'username emoji color budget');
-    res.json(auctions);
+      .populate('participants', 'username emoji color budget')
+      .populate('completedPlayers.player', 'shortName longName overall positions mainPosition')
+      .populate('completedPlayers.winner', 'username emoji color')
+      .sort({ 
+        // Sort active and waiting first, then paused, then completed
+        status: 1,
+        // Within each status, sort by most recent first
+        createdAt: -1 
+      });
+
+    // Group auctions by status for the client
+    const groupedAuctions = {
+      active: auctions.filter(a => a.status === 'active'),
+      pending: auctions.filter(a => a.status === 'pending'),
+      completed: auctions.filter(a => a.status === 'completed')
+    };
+
+    res.json(groupedAuctions);
   } catch (err) {
     console.error('Error fetching auctions:', err);
     res.status(500).json({ message: 'Server error', error: err.message });
@@ -98,7 +116,7 @@ router.post('/:id/join', async (req, res) => {
       return res.status(404).json({ message: 'Auction not found' });
     }
 
-    if (auction.status !== 'waiting') {
+    if (auction.status !== 'pending') {
       return res.status(400).json({ message: 'Cannot join auction that has already started' });
     }
 
@@ -141,7 +159,7 @@ router.post('/:id/start', async (req, res) => {
       return res.status(403).json({ message: 'Only the host can start the auction' });
     }
 
-    if (auction.status !== 'waiting') {
+    if (auction.status !== 'pending') {
       return res.status(400).json({ message: 'Auction has already started or is completed' });
     }
 
@@ -154,8 +172,7 @@ router.post('/:id/start', async (req, res) => {
     auction.currentPlayer = {
       player: auction.availablePlayers[0],
       currentBid: {
-        amount: 0,
-        bidder: null
+        amount: 0
       },
       timeLeft: 30,
       startTime: new Date()
@@ -183,79 +200,82 @@ router.post('/:id/start', async (req, res) => {
 });
 
 // Place bid
-router.post('/:id/bid', async (req, res) => {
+router.post('/:id/bid', auth, async (req, res) => {
   try {
-    const { amount, userId } = req.body;
-    const auction = await Auction.findById(req.params.id)
-      .populate('participants')
-      .populate('currentPlayer.player');
+    const { amount } = req.body;
+    const auctionId = req.params.id;
+    const userId = req.user.id;
 
+    const auction = await Auction.findById(auctionId)
+      .populate('currentPlayer.player', 'shortName longName overall positions mainPosition tier minimumBid pace shooting passing dribbling defending physical');
+    
     if (!auction) {
       return res.status(404).json({ message: 'Auction not found' });
     }
 
+    // Validate auction is active
     if (auction.status !== 'active') {
       return res.status(400).json({ message: 'Auction is not active' });
     }
 
-    const participant = auction.participants.find(p => p._id.toString() === userId);
-    if (!participant) {
-      return res.status(403).json({ message: 'You are not a participant in this auction' });
+    // Get current player's tier info
+    const player = auction.currentPlayer.player;
+    if (!player) {
+      return res.status(404).json({ message: 'Current player not found' });
     }
 
-    if (!auction.currentPlayer) {
-      return res.status(400).json({ message: 'No active player for bidding' });
+    // Use the player's own minimumBid instead of calculating from tier
+    const minimumBid = player.minimumBid;
+
+    // Validate initial bid meets minimum requirement
+    if (auction.currentPlayer.currentBid.amount === 0 && amount < minimumBid) {
+      return res.status(400).json({ 
+        message: `Initial bid must be at least ${minimumBid} for ${player.tier} tier player` 
+      });
     }
 
-    const currentBid = auction.currentPlayer.currentBid?.amount || 0;
-    if (amount <= currentBid) {
-      return res.status(400).json({ message: 'Bid must be higher than current bid' });
+    // Validate bid increment
+    if (auction.currentPlayer.currentBid.amount > 0 && 
+        amount <= auction.currentPlayer.currentBid.amount + auction.settings.minBidIncrement) {
+      return res.status(400).json({ 
+        message: `Bid must be at least ${auction.currentPlayer.currentBid.amount + auction.settings.minBidIncrement}` 
+      });
     }
 
-    // Check if user has enough budget
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
+    // Validate user has enough budget
+    const bidder = await User.findById(userId);
+    if (!bidder) {
+      return res.status(404).json({ message: 'Bidder not found' });
     }
 
-    if (user.budget < amount) {
+    if (bidder.budget < amount) {
       return res.status(400).json({ message: 'Insufficient budget' });
     }
 
     // Update the current bid
     auction.currentPlayer.currentBid = {
       amount: amount,
-      bidder: userId,
-      timestamp: new Date()
+      bidder: userId
     };
-
-    // Reset timer for this player
-    auction.currentPlayer.timeLeft = 30;
-    auction.currentPlayer.startTime = new Date();
 
     await auction.save();
 
-    // Emit the bid update through socket
+    // Populate the updated auction
+    await auction.populate([
+      { path: 'host', select: 'username emoji color' },
+      { path: 'participants', select: 'username emoji color budget' },
+      { path: 'currentPlayer.player', select: 'shortName longName overall positions mainPosition' },
+      { path: 'currentPlayer.currentBid.bidder', select: 'username emoji color' }
+    ]);
+
+    // Emit the updated auction to all participants
     const io = getIO();
-    io.to(auction._id.toString()).emit('bidPlaced', {
-      amount: amount,
-      bidder: user
-    });
+    io.to(auctionId).emit('auctionUpdate', { type: 'bid', auction });
 
-    const populatedAuction = await Auction.findById(auction._id)
-      .populate('host', 'username emoji color')
-      .populate('participants', 'username emoji color budget')
-      .populate('availablePlayers', 'shortName longName overall positions mainPosition')
-      .populate('currentPlayer.player', 'shortName longName overall positions mainPosition')
-      .populate('currentPlayer.currentBid.bidder', 'username emoji color');
-
-    // Broadcast the updated auction to all connected clients
-    broadcastAuctionUpdate(auction._id, 'updated', { auction: populatedAuction });
-
-    res.json(populatedAuction);
-  } catch (err) {
-    console.error('Error placing bid:', err);
-    res.status(500).json({ message: 'Server error', error: err.message });
+    res.json({ success: true, auction });
+  } catch (error) {
+    console.error('Error placing bid:', error);
+    res.status(500).json({ message: 'Failed to place bid', error: error.message });
   }
 });
 
@@ -280,7 +300,7 @@ router.post('/:id/complete-player', async (req, res) => {
       return res.status(404).json({ message: 'Winner not found' });
     }
 
-    // Add to completed players
+    // Add to completed players in auction
     auction.completedPlayers.push({
       player: auction.currentPlayer.player,
       winner: winner._id,
@@ -288,7 +308,22 @@ router.post('/:id/complete-player', async (req, res) => {
       timestamp: new Date()
     });
 
-    // Deduct budget from winner (including host)
+    // Create or update AuctionPlayer record
+    await AuctionPlayer.findOneAndUpdate(
+      { 
+        auction: auction._id,
+        player: auction.currentPlayer.player
+      },
+      {
+        owner: winner._id,
+        amount: auction.currentPlayer.currentBid.amount,
+        isSubstitute: true, // Default to substitute when first won
+        wonAt: new Date()
+      },
+      { upsert: true, new: true }
+    );
+
+    // Deduct budget from winner
     winner.budget -= auction.currentPlayer.currentBid.amount;
     await winner.save();
 
@@ -306,13 +341,31 @@ router.post('/:id/complete-player', async (req, res) => {
     auction.markModified('participants');
     await auction.save();
 
-    // Broadcast the updated auction to all connected clients
-    broadcastAuctionUpdate(auction._id, 'updated', { auction });
+    // Populate auction data before sending response
+    const populatedAuction = await Auction.findById(auction._id)
+      .populate('host', 'username emoji color')
+      .populate('participants', 'username emoji color budget')
+      .populate('availablePlayers', 'shortName longName overall positions mainPosition')
+      .populate('skipVotes', 'username')
+      .populate('currentPlayer.player', 'shortName longName overall positions mainPosition')
+      .populate('currentPlayer.currentBid.bidder', 'username emoji color')
+      .populate('completedPlayers.player', 'shortName longName overall positions mainPosition')
+      .populate('completedPlayers.winner', 'username emoji color');
 
-    res.json(auction);
+    // Notify clients about team update
+    const io = getIO();
+    io.emit('teamUpdate', { 
+      userId: winner._id,
+      auctionId: auction._id
+    });
+
+    // Broadcast the updated auction to all connected clients
+    broadcastAuctionUpdate(auction._id, 'updated', { auction: populatedAuction });
+
+    res.json(populatedAuction);
   } catch (error) {
     console.error('Error completing player auction:', error);
-    res.status(500).json({ message: 'Error completing player auction' });
+    res.status(500).json({ message: 'Error completing player auction', error: error.message });
   }
 });
 
@@ -427,6 +480,192 @@ router.post('/:id/status', auth, async (req, res) => {
   }
 });
 
+// Pause auction
+router.post('/:id/pause', auth, async (req, res) => {
+  try {
+    const auction = await Auction.findById(req.params.id)
+      .populate('host', 'username emoji color')
+      .populate('participants', 'username emoji color budget')
+      .populate('currentPlayer.player', 'shortName longName overall positions mainPosition tier minimumBid')
+      .populate('currentPlayer.currentBid.bidder', 'username emoji color')
+      .populate('completedPlayers.player', 'shortName longName overall positions mainPosition')
+      .populate('completedPlayers.winner', 'username emoji color');
+    
+    if (!auction) {
+      return res.status(404).json({ message: 'Auction not found' });
+    }
+
+    // Check if user is host
+    if (auction.host._id.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Only host can pause auction' });
+    }
+
+    if (auction.status !== 'active') {
+      return res.status(400).json({ message: 'Auction is not active' });
+    }
+
+    auction.status = 'paused';
+    await auction.save();
+
+    // Broadcast the update
+    broadcastAuctionUpdate(auction._id, 'updated', { auction });
+
+    res.json(auction);
+  } catch (error) {
+    console.error('Error pausing auction:', error);
+    res.status(500).json({ message: 'Error pausing auction', error: error.message });
+  }
+});
+
+// Resume auction
+router.post('/:id/resume', auth, async (req, res) => {
+  try {
+    const auction = await Auction.findById(req.params.id)
+      .populate('host', 'username emoji color')
+      .populate('participants', 'username emoji color budget')
+      .populate('currentPlayer.player', 'shortName longName overall positions mainPosition tier minimumBid')
+      .populate('currentPlayer.currentBid.bidder', 'username emoji color')
+      .populate('completedPlayers.player', 'shortName longName overall positions mainPosition')
+      .populate('completedPlayers.winner', 'username emoji color');
+    
+    if (!auction) {
+      return res.status(404).json({ message: 'Auction not found' });
+    }
+
+    // Check if user is host
+    if (auction.host._id.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Only host can resume auction' });
+    }
+
+    if (auction.status !== 'paused') {
+      return res.status(400).json({ message: 'Auction is not paused' });
+    }
+
+    auction.status = 'active';
+    await auction.save();
+
+    // Broadcast the update
+    broadcastAuctionUpdate(auction._id, 'updated', { auction });
+
+    res.json(auction);
+  } catch (error) {
+    console.error('Error resuming auction:', error);
+    res.status(500).json({ message: 'Error resuming auction', error: error.message });
+  }
+});
+
+// Move to next player
+router.post('/:id/next-player', auth, async (req, res) => {
+  try {
+    const auction = await Auction.findById(req.params.id);
+    
+    if (!auction) {
+      return res.status(404).json({ message: 'Auction not found' });
+    }
+
+    // Check if user is host
+    if (auction.host.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Only host can move to next player' });
+    }
+
+    // If there's a current player with a bid, complete their auction first
+    if (auction.currentPlayer?.currentBid?.amount > 0) {
+      const winner = await User.findById(auction.currentPlayer.currentBid.bidder);
+      if (winner) {
+        // Add to completed players
+        auction.completedPlayers.push({
+          player: auction.currentPlayer.player,
+          winner: winner._id,
+          amount: auction.currentPlayer.currentBid.amount,
+          timestamp: new Date()
+        });
+
+        // Update winner's budget
+        winner.budget -= auction.currentPlayer.currentBid.amount;
+        await winner.save();
+      } else {
+        // Add to skipped players
+        auction.skippedPlayers.push(auction.currentPlayer.player);
+      }
+
+      // Move to next player if available
+      if (auction.availablePlayers.length > 0) {
+        auction.currentPlayer = {
+          player: auction.availablePlayers[0],
+          currentBid: {
+            amount: 0
+          },
+          timeLeft: 30,
+          startTime: new Date()
+        };
+        auction.availablePlayers = auction.availablePlayers.slice(1);
+      } else {
+        // End auction if no more players
+        auction.status = 'completed';
+        auction.currentPlayer = null;
+      }
+
+      await auction.save();
+    }
+
+    const populatedAuction = await Auction.findById(auction._id)
+      .populate('host', 'username emoji color')
+      .populate('participants', 'username emoji color budget')
+      .populate('currentPlayer.player', 'shortName longName overall positions mainPosition tier minimumBid')
+      .populate('currentPlayer.currentBid.bidder', 'username emoji color');
+
+    // Broadcast the update
+    broadcastAuctionUpdate(auction._id, 'updated', { auction: populatedAuction });
+
+    res.json(populatedAuction);
+  } catch (error) {
+    console.error('Error moving to next player:', error);
+    res.status(500).json({ message: 'Error moving to next player', error: error.message });
+  }
+});
+
+// End auction
+router.post('/:id/end', auth, async (req, res) => {
+  try {
+    const auction = await Auction.findById(req.params.id)
+      .populate('host', 'username emoji color')
+      .populate('participants', 'username emoji color budget')
+      .populate('availablePlayers', 'shortName longName overall positions mainPosition')
+      .populate('skipVotes', 'username')
+      .populate('currentPlayer.player', 'shortName longName overall positions mainPosition')
+      .populate('currentPlayer.currentBid.bidder', 'username emoji color')
+      .populate('completedPlayers.player', 'shortName longName overall positions mainPosition')
+      .populate('completedPlayers.winner', 'username emoji color');
+
+    if (!auction) {
+      return res.status(404).json({ message: 'Auction not found' });
+    }
+
+    if (auction.host._id.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Only host can end auction' });
+    }
+
+    auction.status = 'completed';
+    auction.currentPlayer = null;
+    await auction.save();
+
+    // Notify all clients about auction end
+    const io = getIO();
+    io.to(auction._id.toString()).emit('auctionEnded', {
+      auctionId: auction._id,
+      message: 'Auction has been ended by the host'
+    });
+
+    // Broadcast the final state
+    broadcastAuctionUpdate(auction._id, 'updated', { auction });
+
+    res.json(auction);
+  } catch (error) {
+    console.error('Error ending auction:', error);
+    res.status(500).json({ message: 'Error ending auction' });
+  }
+});
+
 // Delete auction
 router.delete('/:id', auth, async (req, res) => {
   try {
@@ -452,25 +691,25 @@ router.delete('/:id', auth, async (req, res) => {
   }
 });
 
-// Get auction by ID
+// Get single auction
 router.get('/:id', async (req, res) => {
   try {
     const auction = await Auction.findById(req.params.id)
       .populate('host', 'username emoji color')
       .populate('participants', 'username emoji color budget')
-      .populate('availablePlayers', 'shortName longName overall positions mainPosition')
-      .populate('skipVotes', 'username')
-      .populate('currentPlayer.player', 'shortName longName overall positions mainPosition')
-      .populate('currentPlayer.currentBid.bidder', 'username emoji color');
+      .populate('currentPlayer.player', 'shortName longName overall positions mainPosition tier minimumBid pace shooting passing dribbling defending physical')
+      .populate('currentPlayer.currentBid.bidder', 'username emoji color')
+      .populate('completedPlayers.player', 'shortName longName overall positions mainPosition tier')
+      .populate('completedPlayers.winner', 'username emoji color');
 
     if (!auction) {
       return res.status(404).json({ message: 'Auction not found' });
     }
 
     res.json(auction);
-  } catch (err) {
-    console.error('Error fetching auction:', err);
-    res.status(500).json({ message: 'Server error', error: err.message });
+  } catch (error) {
+    console.error('Error fetching auction:', error);
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
@@ -495,7 +734,8 @@ router.get('/:id/time', async (req, res) => {
         auction.completedPlayers.push({
           player: auction.currentPlayer.player,
           winner: auction.currentPlayer.currentBid.bidder,
-          amount: auction.currentPlayer.currentBid.amount
+          amount: auction.currentPlayer.currentBid.amount,
+          timestamp: new Date()
         });
 
         // Update winner's budget
@@ -512,8 +752,7 @@ router.get('/:id/time', async (req, res) => {
         auction.currentPlayer = {
           player: auction.availablePlayers[0],
           currentBid: {
-            amount: 0,
-            bidder: null
+            amount: 0
           },
           timeLeft: 30,
           startTime: new Date()

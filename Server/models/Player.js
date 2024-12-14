@@ -50,6 +50,19 @@ const playerSchema = new mongoose.Schema({
     type: Number,
     required: true
   },
+  owner: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    default: null
+  },
+  isSubstitute: {
+    type: Boolean,
+    default: true
+  },
+  favorites: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
+  }],
   nationality: {
     type: String,
     required: true
@@ -90,7 +103,29 @@ const playerSchema = new mongoose.Schema({
     type: Number,
     required: true
   },
-  
+  tier: {
+    type: String,
+    enum: ['gold', 'silver', 'bronze', 'extra'],
+    required: true,
+    default: function() {
+      if (this.overall >= 85) return 'gold';
+      if (this.overall >= 75) return 'silver';
+      if (this.overall >= 65) return 'bronze';
+      return 'extra';
+    }
+  },
+  minimumBid: {
+    type: Number,
+    required: true,
+    default: function() {
+      switch(this.tier) {
+        case 'gold': return 50000;
+        case 'silver': return 30000;
+        case 'bronze': return 10000;
+        default: return 0;
+      }
+    }
+  },
   // Main stats
   pace: { type: Number, required: true },
   shooting: { type: Number, required: true },
@@ -162,16 +197,27 @@ const playerSchema = new mongoose.Schema({
     required: true,
     default: []
   },
-  favorites: {
-    type: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    }],
-    default: [],
-    required: true
-  },
 }, {
   timestamps: true
+});
+
+// Pre-save middleware to update tier and minimumBid based on overall rating
+playerSchema.pre('save', function(next) {
+  // Set tier based on overall rating
+  if (this.overall >= 85) this.tier = 'gold';
+  else if (this.overall >= 75) this.tier = 'silver';
+  else if (this.overall >= 65) this.tier = 'bronze';
+  else this.tier = 'extra';
+
+  // Set minimum bid based on tier
+  switch(this.tier) {
+    case 'gold': this.minimumBid = 50000; break;
+    case 'silver': this.minimumBid = 30000; break;
+    case 'bronze': this.minimumBid = 10000; break;
+    default: this.minimumBid = 0;
+  }
+
+  next();
 });
 
 // Static method to get all positions

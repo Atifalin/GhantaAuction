@@ -27,6 +27,10 @@ const userSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Player'
   }],
+  favorites: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Player'
+  }],
   auctionsWon: [{
     player: {
       type: mongoose.Schema.Types.ObjectId,

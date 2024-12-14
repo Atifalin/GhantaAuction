@@ -19,8 +19,13 @@ import {
   Chip,
   ButtonGroup,
   Snackbar,
+  Avatar,
+  InputAdornment,
+  Divider
 } from '@mui/material';
+import { EmojiEvents as TrophyIcon } from '@mui/icons-material';
 import axios from 'axios';
+import { ResponsiveContainer, RadarChart, PolarGrid, PolarAngleAxis, Radar } from 'recharts';
 
 const API_URL = 'http://localhost:5000/api';
 
@@ -30,7 +35,7 @@ const Auction = () => {
   const [auction, setAuction] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [bidAmount, setBidAmount] = useState('');
+  const [customBid, setCustomBid] = useState('');
   const [timeLeft, setTimeLeft] = useState(30);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' });
   const [user] = useState(() => {
@@ -42,6 +47,7 @@ const Auction = () => {
       return null;
     }
   });
+
   const token = user?.token;
 
   const showSnackbar = useCallback((message, severity = 'info') => {
@@ -85,45 +91,11 @@ const Auction = () => {
     }
   }, [id, showSnackbar]);
 
-  useEffect(() => {
-    if (!user) {
-      navigate('/login');
-      return;
-    }
-
-    let timeInterval;
-    let updateInterval;
-
-    const initializeAuction = async () => {
-      try {
-        await fetchAuction();
-        
-        timeInterval = setInterval(() => {
-          fetchTime().catch(console.error);
-        }, 1000);
-        
-        updateInterval = setInterval(() => {
-          fetchAuction().catch(console.error);
-        }, 3000);
-      } catch (error) {
-        console.error('Error initializing auction:', error);
-        showSnackbar('Failed to initialize auction', 'error');
-      }
-    };
-
-    initializeAuction();
-
-    return () => {
-      if (timeInterval) clearInterval(timeInterval);
-      if (updateInterval) clearInterval(updateInterval);
-    };
-  }, [user, navigate, fetchAuction, fetchTime, showSnackbar]);
-
   const handleBid = useCallback(async () => {
     if (!user?.id || !id || !auction) return;
 
     try {
-      const amount = Number(bidAmount);
+      const amount = Number(customBid);
       if (isNaN(amount) || amount <= 0) {
         showSnackbar('Please enter a valid bid amount', 'error');
         return;
@@ -140,7 +112,7 @@ const Auction = () => {
       });
 
       if (response.data) {
-        setBidAmount('');
+        setCustomBid('');
         await fetchAuction();
         showSnackbar('Bid placed successfully', 'success');
       }
@@ -149,115 +121,164 @@ const Auction = () => {
       const errorMessage = error.response?.data?.message || 'Failed to place bid';
       showSnackbar(errorMessage, 'error');
     }
-  }, [bidAmount, user?.id, id, auction, fetchAuction, showSnackbar]);
+  }, [customBid, user?.id, id, auction, fetchAuction, showSnackbar]);
 
-  const handleQuickBid = useCallback(async (increment) => {
-    if (!user?.id || !id || !auction?.currentPlayer?.currentBid) return;
+  const handleQuickBid = useCallback((increment) => {
+    if (!auction?.currentPlayer?.currentBid) return;
+    
+    const currentBid = auction.currentPlayer.currentBid.amount || 0;
+    const newBid = Math.max(currentBid + increment, auction.currentPlayer.player.minimumBid || 0);
+    setCustomBid(newBid.toString());
+    handleBid();
+  }, [auction, handleBid]);
 
-    try {
-      const currentBid = auction.currentPlayer.currentBid.amount;
-      const newBid = currentBid + increment;
-
-      if (newBid > (user.budget || 0)) {
-        showSnackbar('Bid exceeds your budget', 'error');
-        return;
-      }
-      
-      const response = await axios.post(`http://localhost:5000/api/auctions/${id}/bid`, {
-        userId: user.id,
-        amount: newBid
-      });
-
-      if (response.data) {
-        await fetchAuction();
-        showSnackbar('Quick bid placed successfully', 'success');
-      }
-    } catch (error) {
-      console.error('Error placing quick bid:', error);
-      const errorMessage = error.response?.data?.message || 'Failed to place bid';
-      showSnackbar(errorMessage, 'error');
-    }
-  }, [auction, user?.id, id, fetchAuction, showSnackbar]);
-
-  const handleStatusChange = async (newStatus) => {
+  const handleNextPlayer = async () => {
     try {
       const token = localStorage.getItem('token');
       if (!token) {
-        setSnackbar({
-          open: true,
-          message: 'Authentication token not found',
-          severity: 'error'
-        });
-        return;
+        throw new Error('No authentication token found');
       }
 
-      const response = await axios.post(`${API_URL}/auctions/${id}/status`, {
-        status: newStatus
-      }, {
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}` 
+      await axios.post(
+        `${API_URL}/auctions/${id}/next-player`,
+        {},
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          }
         }
-      });
-      
-      if (response.data) {
-        setAuction(response.data);
-        setSnackbar({
-          open: true,
-          message: `Auction ${newStatus}`,
-          severity: 'success'
-        });
-      }
+      );
+
+      showSnackbar('Moving to next player...', 'info');
+      await fetchAuction(); // Fetch the updated auction state
     } catch (error) {
-      console.error('Status change error:', error);
-      setSnackbar({
-        open: true,
-        message: error.response?.data?.message || 'Error updating auction status',
-        severity: 'error'
-      });
+      console.error('Error moving to next player:', error);
+      showSnackbar(error.response?.data?.message || 'Failed to move to next player', 'error');
     }
   };
+
+  const handleStatusChange = async (action) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) {
+        throw new Error('No authentication token found');
+      }
+
+      const response = await axios.post(
+        `${API_URL}/auctions/${id}/${action}`,
+        {},
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        }
+      );
+
+      if (response.data) {
+        setAuction(response.data);
+        showSnackbar(`Auction ${action}ed successfully`, 'success');
+      }
+    } catch (error) {
+      console.error(`Error ${action}ing auction:`, error);
+      showSnackbar(error.response?.data?.message || `Failed to ${action} auction`, 'error');
+    }
+  };
+
+  const handleEndAuction = () => handleStatusChange('end');
 
   const handleDeleteAuction = async () => {
     try {
       const token = localStorage.getItem('token');
       if (!token) {
-        setSnackbar({
-          open: true,
-          message: 'Authentication token not found',
-          severity: 'error'
-        });
-        return;
+        throw new Error('No authentication token found');
       }
 
       await axios.delete(`${API_URL}/auctions/${id}`, {
-        headers: { 
-          'Authorization': `Bearer ${token}` 
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
         }
       });
-      setSnackbar({
-        open: true,
-        message: 'Auction deleted successfully',
-        severity: 'success'
-      });
+
+      showSnackbar('Auction deleted successfully', 'success');
       navigate('/auctions');
     } catch (error) {
-      console.error('Delete error:', error);
-      setSnackbar({
-        open: true,
-        message: error.response?.data?.message || 'Error deleting auction',
-        severity: 'error'
-      });
+      console.error('Error deleting auction:', error);
+      showSnackbar(error.response?.data?.message || 'Failed to delete auction', 'error');
     }
   };
 
+  const getTierColor = (tier) => {
+    switch(tier?.toLowerCase()) {
+      case 'gold': return '#FFD700';
+      case 'silver': return '#C0C0C0';
+      case 'bronze': return '#CD7F32';
+      default: return '#808080';
+    }
+  };
+
+  const formatCurrency = (amount) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  };
+
+  useEffect(() => {
+    if (!user) {
+      navigate('/login');
+      return;
+    }
+
+    let timeInterval;
+    let updateInterval;
+
+    const initializeAuction = async () => {
+      try {
+        await fetchAuction();
+        
+        // Only set up intervals if auction is active
+        if (auction?.status === 'active') {
+          timeInterval = setInterval(() => {
+            fetchTime();
+          }, 1000);
+
+          updateInterval = setInterval(() => {
+            fetchAuction();
+          }, 5000);
+        }
+      } catch (error) {
+        console.error('Error initializing auction:', error);
+        setError('Failed to initialize auction');
+        setLoading(false);
+      }
+    };
+
+    initializeAuction();
+
+    // Cleanup intervals
+    return () => {
+      if (timeInterval) clearInterval(timeInterval);
+      if (updateInterval) clearInterval(updateInterval);
+    };
+  }, [user, navigate, fetchAuction, fetchTime, auction?.status]);
+
   if (!user) {
-    return null;
+    return (
+      <Container>
+        <Alert severity="error" sx={{ mt: 2 }}>
+          Please log in to view this auction
+        </Alert>
+      </Container>
+    );
   }
 
   if (loading) {
     return (
-      <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
         <CircularProgress />
       </Box>
     );
@@ -266,9 +287,7 @@ const Auction = () => {
   if (error) {
     return (
       <Container>
-        <Alert severity="error" sx={{ mt: 2 }}>
-          {error}
-        </Alert>
+        <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>
       </Container>
     );
   }
@@ -279,248 +298,349 @@ const Auction = () => {
         <Alert severity="error" sx={{ mt: 2 }}>
           Auction not found
         </Alert>
+        <Button 
+          variant="contained" 
+          color="primary" 
+          onClick={() => navigate('/auctions')} 
+          sx={{ mt: 2 }}
+        >
+          Back to Auctions
+        </Button>
       </Container>
     );
   }
 
-  const isHost = auction.host._id === user.id;
-  const currentParticipant = auction.participants.find(p => p._id === user.id);
-  const currentBidder = auction.currentPlayer?.currentBid?.bidder;
-  const isHighestBidder = currentBidder?._id === user.id;
+  const isHost = auction?.host?._id === user?.id;
+  const currentParticipant = auction?.participants?.find(p => p?._id === user?.id);
+  const currentBidder = auction?.currentPlayer?.currentBid?.bidder;
+  const isHighestBidder = currentBidder?._id === user?.id;
 
   return (
-    <>
-      <Container maxWidth="lg">
-        <Grid container spacing={3} sx={{ mt: 2 }}>
-          {/* Auction Info */}
-          <Grid item xs={12}>
-            <Paper sx={{ p: 2 }}>
-              <Box display="flex" justifyContent="space-between" alignItems="center">
-                <Box>
-                  <Typography variant="h5" gutterBottom>
-                    {auction.name}
-                  </Typography>
-                  <Typography variant="body1">
-                    Host: {auction.host.username}
-                  </Typography>
+    <Container maxWidth="xl" sx={{ mt: 4, mb: 4 }}>
+      {auction ? (
+        <Grid container spacing={3}>
+          {/* Left Column - Host Controls & Current Player */}
+          <Grid item xs={12} md={8}>
+            {/* Host Controls */}
+            {isHost && (
+              <Paper sx={{ p: 2, mb: 2, bgcolor: 'background.paper' }}>
+                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                  <Typography variant="h6" component="h2">Host Controls</Typography>
+                  <Box>
+                    <Button
+                      variant="contained"
+                      color="primary"
+                      onClick={() => handleStatusChange(auction.status === 'active' ? 'pause' : 'resume')}
+                      sx={{ mr: 1 }}
+                    >
+                      {auction.status === 'active' ? 'Pause' : 'Resume'}
+                    </Button>
+                    <Button
+                      variant="contained"
+                      color="secondary"
+                      onClick={handleNextPlayer}
+                      disabled={auction.status !== 'active'}
+                    >
+                      Next Player
+                    </Button>
+                  </Box>
                 </Box>
-                <Box display="flex" gap={1} alignItems="center">
-                  <Chip 
-                    label={auction.status.toUpperCase()}
-                    color={auction.status === 'active' ? 'success' : 'default'}
+              </Paper>
+            )}
+
+            {/* Current Player Section */}
+            <Paper 
+              elevation={3}
+              sx={{ 
+                position: 'relative',
+                background: 'linear-gradient(to bottom right, #ffffff, #f5f5f5)',
+                borderRadius: 2,
+                overflow: 'hidden',
+                mb: 2
+              }}
+            >
+              {auction.currentPlayer?.player ? (
+                <>
+                  {/* Tier Color Bar */}
+                  <Box 
+                    sx={{ 
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      height: '4px',
+                      background: getTierColor(auction.currentPlayer.player.tier)
+                    }} 
                   />
-                  <Chip 
-                    label={`${auction.participants.length} Participants`}
-                    variant="outlined"
-                  />
-                  {isHost && (
-                    <Box>
-                      {auction.status === 'active' ? (
-                        <Button
-                          variant="contained"
-                          color="warning"
-                          onClick={() => handleStatusChange('paused')}
-                          sx={{ mr: 1 }}
-                        >
-                          Pause
-                        </Button>
-                      ) : auction.status === 'paused' ? (
-                        <Button
-                          variant="contained"
-                          color="success"
-                          onClick={() => handleStatusChange('active')}
-                          sx={{ mr: 1 }}
-                        >
-                          Resume
-                        </Button>
-                      ) : null}
-                      <Button
-                        variant="contained"
-                        color="error"
-                        onClick={() => {
-                          if (window.confirm('Are you sure you want to delete this auction?')) {
-                            handleDeleteAuction();
-                          }
-                        }}
-                      >
-                        Delete
-                      </Button>
+
+                  <Box sx={{ p: 3, position: 'relative' }}>
+                    {/* Timer */}
+                    <Box 
+                      sx={{
+                        position: 'absolute',
+                        top: 16,
+                        right: 16,
+                        bgcolor: timeLeft <= 10 ? 'error.main' : '#1976d2',
+                        color: 'white',
+                        p: 2,
+                        borderRadius: 2,
+                        width: 120,
+                        height: 80,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: 3,
+                        zIndex: 2
+                      }}
+                    >
+                      <Typography variant="h3" sx={{ fontWeight: 'medium' }}>
+                        {timeLeft}s
+                      </Typography>
                     </Box>
-                  )}
-                </Box>
-              </Box>
+
+                    {/* Player Info Header */}
+                    <Box sx={{ pr: 16 }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1 }}>
+                        <Typography variant="h4" sx={{ fontWeight: 'medium' }}>
+                          {auction.currentPlayer.player.shortName}
+                        </Typography>
+                        <Avatar
+                          sx={{
+                            bgcolor: getTierColor(auction.currentPlayer.player.tier),
+                            width: 45,
+                            height: 45,
+                            fontSize: '1.5rem',
+                            fontWeight: 'bold',
+                            color: auction.currentPlayer.player.tier === 'gold' ? 'black' : 'white'
+                          }}
+                        >
+                          {auction.currentPlayer.player.overall}
+                        </Avatar>
+                      </Box>
+                      <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
+                        {auction.currentPlayer.player.longName}
+                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                        <Chip
+                          label="GOLD"
+                          size="small"
+                          sx={{
+                            bgcolor: '#FFD700',
+                            color: 'black',
+                            fontWeight: 'bold',
+                            fontSize: '0.9rem'
+                          }}
+                        />
+                        <Chip
+                          label={auction.currentPlayer.player.mainPosition}
+                          color="primary"
+                          size="small"
+                          sx={{ fontSize: '0.9rem' }}
+                        />
+                        <Typography variant="body2" color="text.secondary">
+                          Min Bid: ${auction.currentPlayer.player.minimumBid?.toLocaleString()}
+                        </Typography>
+                      </Box>
+                    </Box>
+
+                    {/* Stats Chart */}
+                    <Box sx={{ height: 200, mb: 2 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <RadarChart 
+                          data={[
+                            { name: 'PAC', value: auction.currentPlayer.player.pace },
+                            { name: 'SHO', value: auction.currentPlayer.player.shooting },
+                            { name: 'PAS', value: auction.currentPlayer.player.passing },
+                            { name: 'DRI', value: auction.currentPlayer.player.dribbling },
+                            { name: 'DEF', value: auction.currentPlayer.player.defending },
+                            { name: 'PHY', value: auction.currentPlayer.player.physical }
+                          ]} 
+                          margin={{ top: 0, right: 30, bottom: 0, left: 30 }}
+                        >
+                          <PolarGrid />
+                          <PolarAngleAxis dataKey="name" />
+                          <Radar
+                            name="Stats"
+                            dataKey="value"
+                            stroke={getTierColor(auction.currentPlayer.player.tier)}
+                            fill={getTierColor(auction.currentPlayer.player.tier)}
+                            fillOpacity={0.3}
+                          />
+                        </RadarChart>
+                      </ResponsiveContainer>
+                    </Box>
+
+                    {/* Current Bid Section */}
+                    <Divider sx={{ my: 2 }} />
+                    <Box sx={{ mb: 2 }}>
+                      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                        <Box>
+                          <Typography variant="h6" gutterBottom>
+                            Current Bid: ${auction.currentPlayer.currentBid.amount?.toLocaleString() || '0'}
+                          </Typography>
+                          {auction.currentPlayer.currentBid.bidder && (
+                            <Typography color="text.secondary">
+                              by {auction.currentPlayer.currentBid.bidder.username}
+                            </Typography>
+                          )}
+                        </Box>
+                      </Box>
+                      
+                      {/* Quick Bid Buttons */}
+                      <Box display="flex" gap={2} mt={2}>
+                        {[10000, 30000, 50000].map((amount) => (
+                          <Button
+                            key={amount}
+                            variant="contained"
+                            color="primary"
+                            size="large"
+                            onClick={() => handleQuickBid(amount)}
+                            disabled={auction.status !== 'active'}
+                            sx={{
+                              minWidth: 120,
+                              py: 1.5,
+                              fontSize: '1.1rem',
+                              '&:hover': {
+                                transform: 'translateY(-2px)',
+                                transition: 'transform 0.2s'
+                              }
+                            }}
+                          >
+                            +{amount/1000}K
+                          </Button>
+                        ))}
+                      </Box>
+
+                      {/* Custom Bid Input */}
+                      <Box display="flex" gap={2} mt={2}>
+                        <TextField
+                          type="number"
+                          value={customBid}
+                          onChange={(e) => setCustomBid(e.target.value)}
+                          label="Custom Bid"
+                          variant="outlined"
+                          sx={{ flexGrow: 1 }}
+                          InputProps={{
+                            startAdornment: <InputAdornment position="start">$</InputAdornment>
+                          }}
+                        />
+                        <Button
+                          variant="contained"
+                          onClick={handleBid}
+                          disabled={auction.status !== 'active'}
+                          sx={{ minWidth: 120 }}
+                          color="primary"
+                        >
+                          Place Bid
+                        </Button>
+                      </Box>
+                    </Box>
+                  </Box>
+                </>
+              ) : (
+                <Typography variant="h6" color="text.secondary" align="center" py={4}>
+                  No active player
+                </Typography>
+              )}
             </Paper>
           </Grid>
 
-          {/* Current Player */}
-          {auction.status === 'active' && auction.currentPlayer && (
-            <Grid item xs={12} md={8}>
-              <Card>
-                <CardContent>
-                  <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                    <Typography variant="h6">
-                      Current Player
-                    </Typography>
-                    <Chip 
-                      label={`Time Left: ${timeLeft}s`}
-                      color={timeLeft < 10 ? 'error' : 'primary'}
-                      variant="outlined"
-                    />
-                  </Box>
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} md={4}>
-                      <CardMedia
-                        component="img"
-                        height="200"
-                        image={`https://via.placeholder.com/200x200?text=${encodeURIComponent(auction.currentPlayer.player.shortName)}`}
-                        alt={auction.currentPlayer.player.shortName}
-                        sx={{ borderRadius: 1 }}
-                      />
-                    </Grid>
-                    <Grid item xs={12} md={8}>
-                      <Typography variant="h6">
-                        {auction.currentPlayer.player.longName}
-                      </Typography>
-                      <Box display="flex" gap={2} mb={2}>
-                        <Chip 
-                          label={`OVR: ${auction.currentPlayer.player.overall}`}
-                          color="primary"
-                          variant="outlined"
-                        />
-                        <Chip 
-                          label={auction.currentPlayer.player.mainPosition}
-                          variant="outlined"
-                        />
-                      </Box>
-                      <Typography variant="h5" color="primary" gutterBottom>
-                        Current Bid: ${auction.currentPlayer.currentBid.amount.toLocaleString()}
-                        {currentBidder && (
-                          <Typography component="span" variant="body2" color="text.secondary" ml={1}>
-                            by {currentBidder.username}
-                          </Typography>
-                        )}
-                      </Typography>
-
-                      {auction.status === 'active' && (isHost || currentParticipant) && (
-                        <Box sx={{ mt: 2 }}>
-                          <Box display="flex" gap={1} mb={2}>
-                            <ButtonGroup variant="outlined">
-                              <Button onClick={() => handleQuickBid(10000)}>+10K</Button>
-                              <Button onClick={() => handleQuickBid(50000)}>+50K</Button>
-                              <Button onClick={() => handleQuickBid(100000)}>+100K</Button>
-                            </ButtonGroup>
-                          </Box>
-                          <Box display="flex" gap={1}>
-                            <TextField
-                              label="Custom Bid"
-                              type="number"
-                              value={bidAmount}
-                              onChange={(e) => setBidAmount(e.target.value)}
-                              sx={{ flexGrow: 1 }}
-                            />
-                            <Button
-                              variant="contained"
-                              onClick={handleBid}
-                              disabled={isHighestBidder}
-                              sx={{ minWidth: 120 }}
-                            >
-                              Place Bid
-                            </Button>
-                          </Box>
-                        </Box>
-                      )}
-                    </Grid>
-                  </Grid>
-                </CardContent>
-              </Card>
-            </Grid>
-          )}
-
-          {/* Participants and Stats */}
+          {/* Right Column - Stats */}
           <Grid item xs={12} md={4}>
-            <Paper sx={{ p: 2 }}>
-              <Typography variant="h6" gutterBottom>
-                Participants
-              </Typography>
-              <List>
-                {auction.participants.map((participant) => (
-                  <ListItem key={participant._id}>
-                    <ListItemText
-                      primary={
-                        <Box display="flex" alignItems="center" gap={1}>
-                          {participant.username}
-                          {participant._id === auction.host._id && (
-                            <Chip label="Host" size="small" color="primary" />
-                          )}
-                        </Box>
-                      }
-                      secondary={`Budget: $${participant.budget?.toLocaleString()}`}
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            </Paper>
-
-            {/* Auction Stats */}
-            <Paper sx={{ p: 2, mt: 2 }}>
+            <Paper sx={{ p: 2, mb: 2, bgcolor: 'background.paper' }}>
               <Typography variant="h6" gutterBottom>
                 Auction Stats
               </Typography>
-              <List dense>
-                <ListItem>
+              <List>
+                <ListItem divider>
                   <ListItemText
-                    primary="Remaining Players"
-                    secondary={auction.availablePlayers?.length || 0}
+                    primary={
+                      <Box display="flex" justifyContent="space-between">
+                        <Typography>Remaining Players</Typography>
+                        <Typography color="primary.main" fontWeight="bold">
+                          {auction.availablePlayers?.length || 0}
+                        </Typography>
+                      </Box>
+                    }
                   />
                 </ListItem>
-                <ListItem>
+                <ListItem divider>
                   <ListItemText
-                    primary="Completed Players"
-                    secondary={auction.completedPlayers?.length || 0}
+                    primary={
+                      <Box display="flex" justifyContent="space-between">
+                        <Typography>Completed Players</Typography>
+                        <Typography color="success.main" fontWeight="bold">
+                          {auction.completedPlayers?.length || 0}
+                        </Typography>
+                      </Box>
+                    }
                   />
                 </ListItem>
-                <ListItem>
-                  <ListItemText
-                    primary="Skipped Players"
-                    secondary={auction.skippedPlayers?.length || 0}
-                  />
-                </ListItem>
+                {auction.skippedPlayers?.length > 0 && (
+                  <ListItem>
+                    <ListItemText
+                      primary={
+                        <Box display="flex" justifyContent="space-between">
+                          <Typography>Skipped Players</Typography>
+                          <Typography color="warning.main" fontWeight="bold">
+                            {auction.skippedPlayers.length}
+                          </Typography>
+                        </Box>
+                      }
+                    />
+                  </ListItem>
+                )}
               </List>
             </Paper>
 
             {/* Completed Players */}
-            <Paper sx={{ p: 2, mt: 2 }}>
+            <Paper sx={{ p: 2, bgcolor: 'background.paper' }}>
               <Typography variant="h6" gutterBottom>
                 Completed Players
               </Typography>
-              <List dense>
+              <List sx={{ maxHeight: 400, overflow: 'auto' }}>
                 {auction.completedPlayers?.map((item, index) => (
-                  <ListItem key={index}>
+                  <ListItem 
+                    key={index}
+                    divider={index < auction.completedPlayers.length - 1}
+                    sx={{ 
+                      '&:hover': { 
+                        bgcolor: 'action.hover',
+                        transition: 'background-color 0.2s'
+                      }
+                    }}
+                  >
                     <ListItemText
                       primary={
-                        <Box display="flex" alignItems="center" gap={1}>
-                          {item.player.shortName}
-                          <Chip 
-                            label={`$${item.amount.toLocaleString()}`}
-                            size="small"
+                        <Box display="flex" alignItems="center" justifyContent="space-between">
+                          <Typography variant="subtitle1" fontWeight="medium">
+                            {item.player?.shortName}
+                          </Typography>
+                          <Chip
+                            label={`$${item.amount?.toLocaleString()}`}
                             color="primary"
-                            variant="outlined"
+                            sx={{ fontWeight: 'bold' }}
                           />
                         </Box>
                       }
                       secondary={
-                        <Typography variant="body2" color="text.secondary">
-                          Won by {auction.participants.find(p => p._id === item.winner)?.username || 'Unknown'}
-                        </Typography>
+                        <Box display="flex" justifyContent="space-between" mt={0.5}>
+                          <Typography variant="body2" color="text.secondary">
+                            Won by {item.winner?.username}
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            {new Date(item.timestamp).toLocaleTimeString()}
+                          </Typography>
+                        </Box>
                       }
                     />
                   </ListItem>
                 ))}
-                {auction.completedPlayers?.length === 0 && (
+                {(!auction.completedPlayers || auction.completedPlayers.length === 0) && (
                   <ListItem>
                     <ListItemText
                       primary="No completed players yet"
-                      sx={{ color: 'text.secondary' }}
+                      sx={{ color: 'text.secondary', textAlign: 'center' }}
                     />
                   </ListItem>
                 )}
@@ -528,18 +648,15 @@ const Auction = () => {
             </Paper>
           </Grid>
         </Grid>
-      </Container>
+      ) : null}
+      
       <Snackbar
         open={snackbar.open}
         autoHideDuration={6000}
         onClose={handleSnackbarClose}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-      >
-        <Alert onClose={handleSnackbarClose} severity={snackbar.severity} sx={{ width: '100%' }}>
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
-    </>
+        message={snackbar.message}
+      />
+    </Container>
   );
 };
 
